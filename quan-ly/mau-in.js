@@ -22,7 +22,7 @@
 
     // Sheet 1 – Tổng hợp (mẫu "Tổng hợp HC T10 2026", khổ dọc)
     const n1 = 7, t1 = [{ cao: 16, o: [{ v: 'TRƯỜNG ĐẠI HỌC CÔNG NGHIỆP THÀNH PHỐ HỒ CHÍ MINH', cs: n1, b: 1 }] }, { cao: 16, o: [{ v: 'ĐƠN VỊ: VIỆN CÔNG NGHỆ SINH HỌC VÀ THỰC PHẨM', cs: n1, b: 1 }] }, rong(n1),
-      { cao: 36, o: [{ v: 'BẢNG TỔNG HỢP HÓA CHẤT - VẬT TƯ - DƯỢC LIỆU DỰ TRÙ ' + ky, cs: n1, can: 'c', b: 1, co: 14 }] },
+      { cao: 36, o: [{ v: 'BẢNG TỔNG HỢP HÓA CHẤT - VẬT TƯ - NGUYÊN VẬT LIỆU THỰC PHẨM DỰ TRÙ ' + ky, cs: n1, can: 'c', b: 1, co: 14 }] },
       { cao: 16, o: [{ v: ghiChu, cs: n1, can: 'c', i: 1, co: 10 }] },
       { cao: 32, o: ['STT', 'MÃ VT', 'TÊN VẬT TƯ - HÓA CHẤT', 'CÔNG THỨC HÓA HỌC', 'NSX', 'ĐVỊ', 'TỔNG SLG'].map(v => ({ v, b: 1, can: 'c', vien: 1, nen: '#D9E2F3' })) }];
     let nhom = '', stt = 0;
@@ -65,7 +65,7 @@
     const s2 = { ten: tenSheet, huong: 'ngang', cot: [26.6, 7.6, 16.4, 21.2, 7.6, 7.8, 37.4, 16.8, 7.6, 11.8, 14.2, 10.2, 18], lapLai: [5, 5], hang: t2, le: [0.4, 0.17, 0.4, LE_TRAI] };
     return { ten: (caHK ? 'KH vat tu ' + r.hk : 'KH vat tu dot ' + r.dot + ' ' + r.hk), trang: [s1, s2], s1, s2 };
   }
-  // File dự trù một đợt – 3 sheet: (1) tổng dự trù cả học kỳ theo lớp thực hành, (2) dự trù đợt theo môn – lớp, (3) tổng hợp hóa chất – vật tư – dược liệu của đợt
+  // File dự trù một đợt – 3 sheet: (1) tổng dự trù cả học kỳ theo lớp thực hành, (2) dự trù đợt theo môn – lớp, (3) tổng hợp hóa chất – vật tư – nguyên vật liệu thực phẩm của đợt
   function duTruThang(rHK, rDot) {
     const hk = duTru(rHK), th = duTru(rDot), t = 'đợt ' + rDot.dot;
     return { ten: 'Du tru dot ' + rDot.dot + ' (' + rHK.hk + ')',
@@ -173,14 +173,14 @@
   // ---------------- Phiếu dự trù hóa chất – vật tư của một môn (bám bố cục biên bản bàn giao hóa chất để đối chiếu) ----------------
   // o = { hk, mon: {ma, ten, ma_hp, bo_mon}, si_so (tổng SV dự kiến), dm: [{nhom, nhom_vt, stt, ten, ma_vt, nsx, dvt, dm, ghi_chu}], ky, them (dòng trống cuối mỗi nhóm) }
   // Định mức tính cho 01 sinh viên trong cả học phần; SL dự trù = ĐM 1 SV × tổng SV (công thức Excel, tự cập nhật khi sửa tổng SV / định mức).
-  // Thứ tự nhóm: 1. Hóa chất · 2. Dược liệu · 3. Vật tư tiêu hao.
-  const NHOM_DT = ['1. HÓA CHẤT', '2. DƯỢC LIỆU', '3. VẬT TƯ TIÊU HAO'];
+  // Thứ tự nhóm: 1. Hóa chất · 2. Nguyên vật liệu thực phẩm · 3. Vật tư tiêu hao.
+  const NHOM_DT = ['1. HÓA CHẤT', '2. NGUYÊN VẬT LIỆU THỰC PHẨM', '3. VẬT TƯ TIÊU HAO'];
   const VT_TIEU_HAO = /^(bông|gạc|băng|giấy|găng|bao tay|khẩu trang|lame|lamelle|lam kính|đầu côn|đầu típ|tip|ống nghiệm|ống ly tâm|ống đong|túi|bao|màng|que|kim|bơm tiêm|xi lanh|chổi|khăn|nhãn|đĩa petri|hộp|lọ|chai|nút|parafilm|cốc|phễu|pipet|tăm bông|nhiệt kế|viết|bút)/i;
   const LUON_HOA_CHAT = /vaselin|paraf+in/i;
   function nhomDuTru(d) {
     if (/^[123]$/.test(String(d.nhom_dt || ''))) return +d.nhom_dt - 1; // nhóm đã chỉ định (phiếu, sửa trên web)
     const ten = String(d.ten || '').trim(), n = String(d.nhom || ''), v = String(d.nhom_vt || '');
-    if (v === 'DL' || /dược liệu/i.test(n)) return 1;
+    if (v === 'DL' || /dược liệu|nguyên (vật )?liệu/i.test(n)) return 1;
     if (LUON_HOA_CHAT.test(ten)) return 0; // anh Phú chốt 24/10/2026: Vaseline, dầu parafin vào nhóm Hóa chất (danh mục Trường xếp YT)
     if (/vật tư|tiêu hao|dụng cụ/i.test(n) || VT_TIEU_HAO.test(ten) || (v && v !== 'HO')) return 2;
     return 0;

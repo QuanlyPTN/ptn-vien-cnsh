@@ -687,7 +687,7 @@
       return;
     }
     M('<div class="spin"></div>');
-    const r = await api('ck_dtm_mo', { ma }), p = hoSo(), NH = ['Hóa chất', 'Dược liệu', 'Vật tư tiêu hao'], r3 = (n) => Math.round((+n || 0) * 1000) / 1000;
+    const r = await api('ck_dtm_mo', { ma }), p = hoSo(), NH = ['Hóa chất', 'Nguyên vật liệu thực phẩm', 'Vật tư tiêu hao'], r3 = (n) => Math.round((+n || 0) * 1000) / 1000;
     let ds = r.dong.map(d => ({ nhom: Math.max(0, Math.min(2, (+d.nhom_dt || 1) - 1)), ten: d.ten || '', cong_thuc: d.cong_thuc || '', ma_vt: d.ma_vt || '', nsx: d.nsx || '', dvt: d.dvt || '', dm: d.dm === '' || d.dm == null ? '' : +d.dm, sl: +d.sl || '', ghi_chu: d.ghi_chu || '' }));
     let ss = +r.si_so || 0, goiY = [], gc = '', camKet = false; // ghi chú, ô xác nhận giữ qua các lần vẽ lại
     const slCua = (d) => d.dm === '' ? (+d.sl || '') : r3(d.dm * ss);

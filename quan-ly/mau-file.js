@@ -1,6 +1,6 @@
 /* File Excel mẫu chuẩn cho các chỗ tải file lên ở trang quản lý (nút "Tải file mẫu" trong hộp tải lên).
    Mỗi mẫu 2 trang tính: (1) trang nhập dữ liệu – đúng tiêu đề cột mà hệ thống đọc, để trống cho cán bộ điền; (2) "Huong dan" – quy tắc + ví dụ.
-   Trang nhập luôn là trang đầu (hệ thống đọc trang đầu / trang có tên gợi ý). Kho hóa chất, kho dược liệu: mẫu riêng trong app-mo-rong.js (taiMauKho). */
+   Trang nhập luôn là trang đầu (hệ thống đọc trang đầu / trang có tên gợi ý). Kho hóa chất, kho nguyên vật liệu thực phẩm: mẫu riêng trong app-mo-rong.js (taiMauKho). */
 (function () {
   'use strict';
   // mã → { ten (tên hiển thị), tep (tên file), trang (tên trang nhập), tieuDe, cot: [[tiêu đề cột, độ rộng]], truoc: [các dòng phía trên tiêu đề], hd: [quy tắc], vd: [dòng ví dụ] }
@@ -21,11 +21,11 @@
       hd: ['Mỗi môn bắt đầu bằng một dòng ghi "1. TH <tên môn>", "2. TH <tên môn>"… ở cột TÊN BÀI TẬP (cùng dòng với hóa chất đầu tiên).',
         'Các dòng hóa chất của môn: có STT (1, 2, 3…), QUI CÁCH VẬT TƯ, MÃ VT (nếu có), ĐVỊ và SLG/1HS = định mức cho 1 sinh viên.',
         'Lớp học của môn: ghi MÃ SỐ LỚP, MÃ HỌC PHẦN, SĨ SỐ ở các dòng đầu của môn (mỗi lớp một dòng) – không bắt buộc.',
-        'Nhóm (Hóa chất / Dược liệu / Vật tư tiêu hao): chia 3 vùng ngăn bằng MỘT dòng trắng (vùng 1 Hóa chất, vùng 2 Dược liệu, vùng 3 Vật tư tiêu hao; thiếu nhóm nào để 2 dòng trắng liền nhau), STT mỗi vùng từ 1; hoặc ghi tên nhóm ở cột TÊN BÀI TẬP của dòng đầu nhóm. Không chia thì hệ thống tự xếp theo tên / mã VT.',
+        'Nhóm (Hóa chất / Nguyên vật liệu thực phẩm / Vật tư tiêu hao): chia 3 vùng ngăn bằng MỘT dòng trắng (vùng 1 Hóa chất, vùng 2 Nguyên vật liệu thực phẩm, vùng 3 Vật tư tiêu hao; thiếu nhóm nào để 2 dòng trắng liền nhau), STT mỗi vùng từ 1; hoặc ghi tên nhóm ở cột TÊN BÀI TẬP của dòng đầu nhóm. Không chia thì hệ thống tự xếp theo tên / mã VT.',
         'File có thể chỉ gồm một vài môn; định mức của các môn có trong file được thay, biên bản hóa chất của học kỳ tự cập nhật. Không ghi gì dưới dòng "Người lập" / "Viện trưởng".'],
       vd: [['1. TH dược khoa', '', 'DHDH21A', '420301632901', 20, 1, 'Acid ascorbic', '803', 'TQ', 'Gam', 0.4, '', ''],
         ['', '', 'DHDH21B', '420301632902', 22, 2, 'Cồn 96 độ', '1053', 'TQ', 'Lít', 0.065, '', ''],
-        ['DƯỢC LIỆU KHÔ', '', '', '', '', 1, 'Rễ mạch môn', '', 'VN', 'Gam', 2, '', ''],
+        ['NGUYÊN VẬT LIỆU THỰC PHẨM', '', '', '', '', 1, 'Bột mì đa dụng', '', 'VN', 'Gam', 2, '', ''],
         ['2. TH bào chế 1', '', 'DHDH20A', '420301634001', 25, 1, 'Vaselin', '1790', 'VN', 'Gam', 5, '', '']] },
     dung_cu: { ten: 'Dụng cụ của một môn', tep: '04 Mau dung cu cua mot mon', trang: 'Dung cu', tieuDe: 'DANH SÁCH DỤNG CỤ THỰC HÀNH CỦA MÔN',
       truoc: [['MÔN:', '']], cot: [['STT', 6], ['Tên dụng cụ', 36], ['NSX', 12], ['ĐVT', 8], ['Số lượng / 1 bộ', 16], ['Ghi chú', 24]],
@@ -37,7 +37,7 @@
       cot: [['TÊN BÀI TẬP', 24], ['MÃ BT', 6], ['MÃ SỐ LỚP', 11], ['MÃ HỌC PHẦN', 15], ['SĨ SỐ', 6], ['STT', 5], ['QUI CÁCH VẬT TƯ', 30], ['MÃ VT', 8], ['NSX', 8], ['ĐVỊ', 7], ['SLG/1HS', 9], ['SLG', 9], ['GHI CHÚ', 16]],
       hd: ['Cùng cách ghi với mẫu định mức hóa chất: mỗi môn bắt đầu bằng dòng "1. TH <tên môn>" (hoặc chỉ tên môn) ở cột TÊN BÀI TẬP.',
         'SLG: tổng số lượng dự trù. Dòng để trống SLG được tính = SLG/1HS × tổng sĩ số các lớp của môn trong file.',
-        'NHÓM: trong mỗi môn chia 3 vùng ngăn bằng MỘT dòng trắng: vùng 1 = Hóa chất, vùng 2 = Dược liệu, vùng 3 = Vật tư tiêu hao (STT mỗi vùng bắt đầu lại từ 1). Môn không có một nhóm thì để 2 dòng trắng liền nhau ở chỗ nhóm đó. Không chia vùng thì hệ thống tự xếp theo tên / mã VT.',
+        'NHÓM: trong mỗi môn chia 3 vùng ngăn bằng MỘT dòng trắng: vùng 1 = Hóa chất, vùng 2 = Nguyên vật liệu thực phẩm, vùng 3 = Vật tư tiêu hao (STT mỗi vùng bắt đầu lại từ 1). Môn không có một nhóm thì để 2 dòng trắng liền nhau ở chỗ nhóm đó. Không chia vùng thì hệ thống tự xếp theo tên / mã VT.',
         'Có thể tải lên Phiếu dự trù do hệ thống in ra (mỗi trang tính một môn) thay cho mẫu này.'],
       vd: [['1. TH dược khoa', '', 'DHDH21A', '420301632901', 20, 1, 'Acid ascorbic', '803', 'TQ', 'Gam', 0.4, 49.2, ''],
         ['', '', 'DHDH21B', '420301632902', 22, 2, 'Cồn 96 độ', '1053', 'TQ', 'Lít', 0.065, '', '']] },

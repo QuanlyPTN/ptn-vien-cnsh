@@ -1,0 +1,1562 @@
+/* Trang quản lý PTN – Viện Công nghệ Sinh học và Thực phẩm. Khung trang + giai đoạn 1, 4; các trang giai đoạn 2 – 6 ở app-mo-rong.js. */
+(function () {
+  'use strict';
+  const DEMO = typeof window.PTN_DEMO === 'function';
+  const KHOA_TK = 'vcnsh_ql_tk';
+  const XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  const S = { tk: null, toi: null, dm: null, cache: {} };
+  const $ = (id) => document.getElementById(id);
+
+  // ---------------- Tiện ích ----------------
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function homNay() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function congNgay(n) { const d = new Date(Date.now() + n * 864e5); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function ngayVN(s) { const m = /^(\d{4})-(\d{2})-(\d{2})(.*)$/.exec(s || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] + m[4] : (s || ''); }
+  function tien(s) { const n = parseInt(String(s || '').replace(/\D/g, ''), 10); return n ? n.toLocaleString('vi-VN') + ' đ' : ''; }
+  function boDau(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase(); }
+  function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'toast' + (bad ? ' bad' : ''); clearTimeout(toast._t); toast._t = setTimeout(() => { t.className = 'toast hide'; }, bad ? 5000 : 2600); }
+  function tenMay() {
+    const u = navigator.userAgent;
+    const os = /iPhone|iPad/.test(u) ? 'iPhone/iPad' : /Android/.test(u) ? 'Android' : /Mac/.test(u) ? 'Mac' : /Windows/.test(u) ? 'Windows' : 'Máy khác';
+    const br = /Edg\//.test(u) ? 'Edge' : /Chrome\//.test(u) ? 'Chrome' : /Safari\//.test(u) ? 'Safari' : /Firefox\//.test(u) ? 'Firefox' : 'Trình duyệt';
+    return os + ' – ' + br;
+  }
+  function luuTk(tk, nho) {
+    try { localStorage.removeItem(KHOA_TK); sessionStorage.removeItem(KHOA_TK); (nho ? localStorage : sessionStorage).setItem(KHOA_TK, tk); } catch (e) { /* trình duyệt chặn lưu trữ */ }
+  }
+  // Menu trái trên máy tính: ghim (luôn hiện) hoặc tự ẩn (rê chuột vào mép trái để hiện) – nhớ theo từng máy
+  function menuTuAn(dat) {
+    try { if (dat === undefined) return localStorage.getItem('vcnsh_menu_tu_an') === '1'; localStorage.setItem('vcnsh_menu_tu_an', dat ? '1' : '0'); } catch (e) { /* trình duyệt chặn lưu trữ */ }
+    return false;
+  }
+  function datNutGhim() {
+    const an = $('layout').classList.contains('tu-an'), b = $('b-ghim-menu');
+    b.textContent = an ? '📌' : '«'; b.title = an ? 'Ghim menu (luôn hiện)' : 'Tự ẩn menu (rê chuột vào mép trái để hiện)'; b.setAttribute('aria-label', b.title);
+  }
+  function docTk() { try { return localStorage.getItem(KHOA_TK) || sessionStorage.getItem(KHOA_TK); } catch (e) { return null; } }
+  function xoaTk() { try { [localStorage, sessionStorage].forEach(k => { k.removeItem(KHOA_TK); k.removeItem(KHOA_TOI); }); } catch (e) { /* bỏ qua */ } }
+  // Lưu thông tin "tôi" (tên, quyền, danh mục) cùng chỗ với phiên: lần mở sau hiện trang ngay, máy chủ trả lời thì cập nhật lại
+  const KHOA_TOI = 'vcnsh_ql_toi';
+  function luuToi(r) { try { const k = localStorage.getItem(KHOA_TK) === S.tk ? localStorage : sessionStorage; k.setItem(KHOA_TOI, JSON.stringify({ tk: String(S.tk).slice(-12), r })); } catch (e) { /* bỏ qua */ } }
+  function docToi() { try { const o = JSON.parse(localStorage.getItem(KHOA_TOI) || sessionStorage.getItem(KHOA_TOI) || 'null'); return o && o.tk === String(S.tk).slice(-12) ? o.r : null; } catch (e) { return null; } }
+
+  const MAU_TT = { 'Đang sử dụng': 't-ok', 'Đang cho mượn': 't-info', 'Hỏng – chờ sửa': 't-bad', 'Đang sửa': 't-warn', 'Ngưng sử dụng': 't-gray', 'Đã thanh lý': 't-gray' };
+  const tag = (tt) => '<span class="tag ' + (MAU_TT[tt] || 't-gray') + '">' + esc(tt) + '</span>';
+  function hanTag(ngay) {
+    if (!ngay) return '<span class="note">—</span>';
+    const hn = homNay();
+    if (ngay < hn) return '<span class="tag t-bad">' + ngayVN(ngay) + ' · quá hạn</span>';
+    if (ngay <= congNgay(30)) return '<span class="tag t-warn">' + ngayVN(ngay) + '</span>';
+    if (ngay <= congNgay(60)) return '<span class="tag t-info">' + ngayVN(ngay) + '</span>';
+    return ngayVN(ngay);
+  }
+
+  // ---------------- Gọi máy chủ ----------------
+  // Đơn QR (don_ds, don_ct, hom_nay, qr_ds…) luôn đọc mới để xử lý kịp thời.
+  // Kết quả đọc giữ 60 giây trong trang (quay lại trang vừa xem hiện ngay); có thao tác ghi bất kỳ thì xóa hết để đọc lại dữ liệu mới
+  const API_DOC = /^(tong_quan|nd_ds|phong_ds|phong_ct|tb_ds|tb_ct|hk_ds|vt_ds|mon_ds|mon_ct|lop_ds|kh_tinh|bb_ds|bb_ct|phong_lich|hs_ds|hs_ct|kho_ds|vt_goi_y|dt_dot|dt_tinh|dtm_ma_ds|dtm_dn_ds|dtm_dn_ct|dt_cap_ds|dtm_tong|dtm_doi_chieu|dtm_phieu|dtm_ct|kho_lo|kho_so_ks|bc_tb|bc_thang|bc_khac|bc_da_luu|so_ds|so_tong)$/;
+  const DEM = new Map();
+  async function api(act, data) {
+    if (!API_DOC.test(act)) { DEM.clear(); return goiMayChu(act, data); }
+    const k = act + JSON.stringify(data || {}), c = DEM.get(k);
+    if (c && Date.now() - c.t < 60000) return JSON.parse(c.v);
+    const r = await goiMayChu(act, data);
+    DEM.set(k, { t: Date.now(), v: JSON.stringify(r) });
+    return r;
+  }
+  // tên file vừa chọn ở hộp tải file (ô #x-file) → gửi kèm lệnh nhập để ghi vào Lịch sử tải file
+  const LENH_TAI_FILE = /^(lop_nhap|dm_nhap|vt_nhap|dtm_nhap|dt_nhap_cap|kho_nhap_ds|tb_nhap)$/;
+  document.addEventListener('change', (e) => { if (e.target && e.target.id === 'x-file' && e.target.files && e.target.files[0]) S.tepTai = e.target.files[0].name; });
+  async function goiMayChu(act, data) {
+    const body = Object.assign({ act, tk: S.tk }, data || {});
+    if (LENH_TAI_FILE.test(act) && S.tepTai && !body.tep) body.tep = S.tepTai;
+    let j;
+    if (DEMO) j = window.PTN_DEMO(body);
+    else {
+      if (!window.PTN_API || window.PTN_API.indexOf('http') !== 0) throw new Error('Chưa cấu hình địa chỉ máy chủ (config.js)');
+      let r;
+      try { r = await fetch(window.PTN_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), redirect: 'follow' }); }
+      catch (e) { throw new Error(navigator.onLine === false ? 'Không có kết nối mạng' : 'Không kết nối được máy chủ'); }
+      j = await r.json();
+    }
+    if (!j.ok) {
+      if (j.code === 'AUTH' && act !== 'dang_nhap') { xoaTk(); S.tk = null; manDangNhap(j.err); }
+      throw new Error(j.err || 'Lỗi máy chủ');
+    }
+    return j.r;
+  }
+  // chạy một thao tác có nút bấm: khóa nút, báo lỗi
+  async function chay(btn, fn) {
+    const cu = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Đang xử lý…'; }
+    try { return await fn(); }
+    catch (e) { toast(e.message, true); throw e; }
+    finally { if (btn) { btn.disabled = false; btn.textContent = cu; } }
+  }
+
+  // ---------------- Hộp thoại ----------------
+  function moHop(html, onOpen) {
+    $('modal-body').innerHTML = html; $('modal').classList.remove('hide');
+    if (document.body.classList.contains('chi-xem')) anNutGhi($('modal-body'));
+    const f = $('modal-body').querySelector('input,select,textarea'); if (f) setTimeout(() => f.focus(), 50);
+    if (onOpen) onOpen($('modal-body'));
+  }
+  function dongHop() { $('modal').classList.add('hide'); $('modal-body').innerHTML = ''; }
+  $('modal').addEventListener('click', (e) => { if (e.target.id === 'modal' || e.target.dataset.dong !== undefined) dongHop(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('modal').classList.contains('hide')) dongHop(); });
+  function giaTri(root) {
+    const o = {};
+    root.querySelectorAll('[name]').forEach(el => { o[el.name] = el.type === 'checkbox' ? el.checked : el.value.trim(); });
+    return o;
+  }
+  function o(name, label, opts) {
+    opts = opts || {};
+    const req = opts.req ? ' <em>*</em>' : '';
+    const v = esc(opts.v == null ? '' : opts.v);
+    let input;
+    if (opts.select) input = '<select name="' + name + '" style="width:100%">' + opts.select.map(x => { const val = Array.isArray(x) ? x[0] : x, t = Array.isArray(x) ? x[1] : x; return '<option value="' + esc(val) + '"' + (String(val) === String(opts.v || '') ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select>';
+    else if (opts.area) input = '<textarea name="' + name + '" placeholder="' + esc(opts.ph || '') + '">' + v + '</textarea>';
+    else input = '<input type="' + (opts.type || 'text') + '" name="' + name + '" value="' + v + '" placeholder="' + esc(opts.ph || '') + '"' + (opts.extra || '') + '>';
+    return '<label class="f' + (opts.full ? ' full' : '') + '"><span>' + esc(label) + req + '</span>' + input + (opts.help ? '<span class="note">' + esc(opts.help) + '</span>' : '') + '</label>';
+  }
+
+  // Gợi ý tên khi nhập tay hóa chất – vật tư (ô name="ten" trong root): chọn tên có sẵn → tự điền mã VT (và ĐVT, NSX nếu trống);
+  // tên chưa có trong danh mục → ô mã để trống, hiện "Chưa MVT" (máy chủ vẫn tra lại theo tên khi lưu)
+  function ganGoiYVT(root) {
+    const ten = root.querySelector('[name=ten]'), ma = root.querySelector('[name=ma_vt]'); if (!ten) return;
+    const id = 'goi-y-vt-' + Math.random().toString(36).slice(2, 8), dl = document.createElement('datalist'); dl.id = id; ten.setAttribute('list', id); ten.after(dl);
+    if (ma) ma.placeholder = 'Chưa MVT – chọn tên gợi ý để tự điền';
+    let ds = [], t = null, tuDien = false;
+    ten.addEventListener('input', () => {
+      const q = ten.value.trim(), v = ds.find(x => x.ten === ten.value);
+      if (v) return dien(v);
+      if (ma && tuDien) { ma.value = ''; tuDien = false; } // đổi sang tên khác → bỏ mã đã tự điền
+      clearTimeout(t); if (q.length < 2) return;
+      t = setTimeout(async () => { try { ds = await api('vt_goi_y', { q }); dl.innerHTML = ds.map(x => '<option value="' + esc(x.ten) + '">' + esc((x.ma_vt ? 'MVT ' + x.ma_vt : 'Chưa MVT') + (x.dvt ? ' · ' + x.dvt : '') + (x.nsx ? ' · ' + x.nsx : '')) + '</option>').join(''); } catch (e) { /* bỏ qua gợi ý */ } }, 250);
+    });
+    function dien(v) {
+      if (ma) { ma.value = v.ma_vt || ''; tuDien = true; }
+      [['dvt', v.dvt], ['nsx', v.nsx]].forEach(([k, g]) => { const el = root.querySelector('[name=' + k + ']'); if (el && !el.value.trim() && g) el.value = g; });
+    }
+  }
+
+  // ---------------- Biểu tượng (nét mảnh, 24×24) ----------------
+  const ICON = {
+    'tong-quan': '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+    'don': '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    'de-tai': '<path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 2 9 2 12 0v-5"/>',
+    'phong': '<path d="M3 21h18"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/><path d="M9 21v-6h6v6"/><path d="M9 8h.01M15 8h.01M9 11.5h.01M15 11.5h.01"/>',
+    'tai-san': '<path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/>',
+    'kiem-dinh': '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+    'hoa-chat': '<path d="M9 3h6"/><path d="M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 15h10"/>',
+    'kho': '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/>',
+    'kho-dl': '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>',
+    'bien-ban': '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>',
+    'bao-cao': '<path d="M3 3v18h18"/><path d="M8 17v-6"/><path d="M13 17V7"/><path d="M18 17v-4"/>',
+    'so': '<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/><path d="M8 7h8M8 11h8"/>',
+    'bieu-mau': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>',
+    'giang-vien': '<path d="M3 4h18v12H3z"/><path d="M7 20h10M12 16v4"/><circle cx="8.5" cy="9" r="2"/><path d="M5.5 14c.6-1.6 1.7-2.5 3-2.5s2.4.9 3 2.5M14 8h4M14 11h3"/>',
+    'lich-phong-th': '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M8 13h3v3H8z"/>',
+    'lich-su-tai': '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
+    'don-qr': '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+    'cai-dat': '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+    'can-bo': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    'nguoi-dung': '<rect x="7" y="2" width="10" height="20" rx="2"/><circle cx="12" cy="9" r="2.2"/><path d="M9 15c.6-1.4 1.6-2 3-2s2.4.6 3 2M11 18.5h2"/>',
+    'nhat-ky': '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+    'tai-khoan': '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    'menu': '<path d="M4 6h16M4 12h16M4 18h16"/>', 'thoat': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+    'kiem': '<path d="M20 6 9 17l-5-5"/>', 'qr': '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>'
+  };
+  const icon = (k, cls) => '<svg class="i' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICON[k] || '') + '</svg>';
+
+  // ---------------- Đăng nhập ----------------
+  function logo(mau) { return '<img class="logo-ngang" src="../logo-ngang-' + (mau || 'am') + '.png" alt="Đại học Công nghiệp TP. Hồ Chí Minh – Viện Công nghệ Sinh học và Thực phẩm">'; }
+  function manDangNhap(thongBao) {
+    document.body.classList.remove('in');
+    $('app').innerHTML = (DEMO ? '<div class="demo-bar">' + thanhDemo() + ' Admin: <b>nguyen.phu789@gmail.com</b> / <b>123456</b> · Thử phân quyền: <b>canbo.hoachat@gmail.com</b> / <b>HoaChat2026</b>, <b>canbo.xem@gmail.com</b> / <b>ChiXem2026</b>, <b>canbo.ptn@gmail.com</b> / <b>CanBo2026</b></div>' : '') +
+      thanhDiChuyen() + '<div class="login"><section class="login-hero"><div class="brand">' + logo() + '</div>' +
+      '<div style="position:relative;z-index:1"><div class="vach"></div><h1>Hệ thống quản lý<br><span>Phòng thí nghiệm</span></h1><p>Tài sản – thiết bị, đơn đăng ký QR1 – QR8, hồ sơ đề tài, hóa chất – vật tư, biên bản bàn giao và báo cáo trên một nền tảng.</p>' +
+      '<ul><li>' + icon('kiem') + 'Đơn đăng ký qua một mã QR tổng</li><li>' + icon('kiem') + 'Dự trù, biên bản bàn giao tự động theo thời khóa biểu</li><li>' + icon('kiem') + 'Theo dõi thiết bị, kho hóa chất – dược liệu theo thời gian thực</li></ul></div>' +
+      '<small class="chan">© Viện Công nghệ Sinh học và Thực phẩm – IUH</small></section><div class="login-form"><form class="login-box" id="f-login" autocomplete="on">' +
+      '<h2>Đăng nhập</h2><p class="note" style="margin:0 0 22px">Dành cho cán bộ phòng thí nghiệm: đăng nhập bằng <b>Gmail cá nhân</b> và <b>mật khẩu do admin cấp</b>.</p>' +
+      o('email', 'Gmail cá nhân', { type: 'email', v: (DEMO ? 'nguyen.phu789@gmail.com' : ''), ph: 'ten.canbo@gmail.com', extra: ' autocomplete="username" required' }) +
+      '<div class="mk-o">' + o('mat_khau', 'Mật khẩu', { type: 'password', v: (DEMO ? '123456' : ''), extra: ' autocomplete="current-password" required' }) + '<button type="button" class="mk-hien" title="Hiện / ẩn mật khẩu">👁</button></div>' +
+      '<label class="check"><input type="checkbox" name="ghi_nho" checked> Ghi nhớ đăng nhập trên máy này</label>' +
+      '<div class="err" id="login-err">' + esc(thongBao || '') + '</div>' +
+      '<button class="btn">Đăng nhập</button>' +
+      '<p class="note" style="margin-top:16px">Quên mật khẩu: liên hệ admin để được cấp lại. Máy dùng chung: bỏ chọn "Ghi nhớ" và bấm Thoát khi dùng xong.</p></form></div></div>';
+    ganHienMatKhau($('f-login'));
+    $('f-login').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const v = giaTri(e.target), btn = e.target.querySelector('button');
+      $('login-err').textContent = '';
+      try {
+        const r = await chay(btn, () => api('dang_nhap', { email: v.email, mat_khau: v.mat_khau, ghi_nho: v.ghi_nho, may: tenMay() }));
+        S.tk = r.tk; luuTk(r.tk, v.ghi_nho); await batDau();
+      } catch (err) { $('login-err').textContent = err.message; }
+    });
+  }
+
+  // ‹ Quay lại · Tiếp › · Trang công khai – cần khi mở từ ứng dụng cài ra màn hình chính (không có nút của trình duyệt)
+  function lienKetCongKhai() { return DEMO ? '../chay-thu.html' : '../'; }
+  function thanhDiChuyen() {
+    return '<div class="di-chuyen"><button type="button" class="btn o sm" onclick="history.length>1?history.back():location.href=\'' + lienKetCongKhai() + '\'" title="Quay lại trang trước">‹ Quay lại</button>' +
+      '<button type="button" class="btn o sm" onclick="history.forward()" title="Đi tiếp trang sau">Tiếp ›</button>' +
+      '<a class="btn o sm" href="' + lienKetCongKhai() + '" title="Về trang đăng ký của SV / GV">⌂ Trang công khai</a></div>';
+  }
+  // nút 👁 hiện / ẩn mật khẩu trong một form
+  function ganHienMatKhau(root) {
+    root.querySelectorAll('.mk-hien').forEach(b => { b.onclick = () => { const i = b.parentNode.querySelector('input'); i.type = i.type === 'password' ? 'text' : 'password'; i.focus(); }; });
+  }
+
+  async function batDau() {
+    S.tk = S.tk || docTk();
+    if (!S.tk) return manDangNhap();
+    const apToi = (r) => { S.toi = r; S.dm = r.danh_muc; window.PTN_KY = Object.assign({ nguoi: r.nguoi.ten }, r.ky); luuToi(r); };
+    const khoaQuyen = (r) => JSON.stringify([r.nguoi, r.quyen]);
+    const daLuu = docToi();
+    if (daLuu) { // hiện ngay theo lần trước; quyền / vai trò đổi thì vẽ lại khung
+      apToi(daLuu); khung(); dieuHuong();
+      api('toi').then(r => { const doi = khoaQuyen(r) !== khoaQuyen(S.toi); apToi(r); if (doi) { khung(); dieuHuong(); } }).catch(() => { /* lỗi phiên: api() đã đưa về màn đăng nhập */ });
+      return;
+    }
+    $('app').innerHTML = '<div class="loading"><div class="spin"></div></div>';
+    try { apToi(await api('toi')); } catch (e) { if (S.tk) $('app').innerHTML = '<div class="card" style="margin:40px">Không tải được: ' + esc(e.message) + ' <button class="btn sm" onclick="location.reload()">Thử lại</button></div>'; return; }
+    khung(); dieuHuong();
+  }
+
+  // ---------------- Khung trang ----------------
+  const MENU = [
+    ['tong-quan', '◧', 'Hôm nay'], ['don', '✉', 'Đơn đăng ký QR1 – QR8'], ['de-tai', '✎', 'Hồ sơ đề tài KLTN – NCKH'], ['nguoi-dung', '☺', 'Người dùng trang dùng chung'], ['phong', '▦', 'Phòng thí nghiệm'], ['lich-phong-th', '▦', 'Lịch phòng thực hành'], ['tai-san', '⚙', 'Tài sản'],
+    ['kiem-dinh', '✓', 'Kiểm định – bảo dưỡng'], ['hoa-chat', '⚗', 'Hóa chất – vật tư'], ['kho', '▣', 'Kho hóa chất F4.01'], ['kho-dl', '❀', 'Kho dược liệu'],
+    ['bien-ban', '▤', 'Biên bản bàn giao'], ['bao-cao', '▥', 'Báo cáo – thống kê'], ['so', '☷', 'Sổ theo dõi – in ấn'], ['bieu-mau', '⎙', 'Biểu mẫu PTN'],
+    ['giang-vien', '☺', 'Giảng viên'], ['lich-su-tai', '↺', 'Lịch sử tải file'], ['cai-dat', '⚑', 'Cài đặt – mã QR tổng', 1], ['can-bo', '☺', 'Cán bộ', 1], ['nhat-ky', '☰', 'Nhật ký', 1], ['tai-khoan', '⚿', 'Tài khoản']
+  ];
+  const NHOM_MENU = { 'tong-quan': 'Vận hành', 'hoa-chat': 'Hóa chất – kho', 'bao-cao': 'Báo cáo – tài liệu', 'giang-vien': 'Hệ thống' };
+  const TUYEN = {}; // trang do app-mo-rong.js đăng ký: { 'kho': (p) => … }
+  // dòng báo chạy thử: demo liên thông (dữ liệu thử lưu trong trình duyệt, dùng chung với trang công khai) + làm lại dữ liệu mẫu
+  function thanhDemo() {
+    return window.PTN_DEMO_LIEN_THONG ? 'CHẠY THỬ – dữ liệu thử lưu trong trình duyệt này, <b>dùng chung với trang công khai</b> (đơn SV/GV gửi bên đó hiện ở đây). ' +
+      '<a href="../chay-thu.html" target="_blank" rel="noopener">Mở trang công khai ↗</a> · <a href="#" onclick="if(confirm(\'Xóa mọi dữ liệu đã nhập thử và tạo lại dữ liệu mẫu (cả trang công khai)?\')){PTN_DEMO_LAM_LAI();location.reload()}return false">Làm lại dữ liệu mẫu</a>.'
+      : 'CHẾ ĐỘ CHẠY THỬ – dữ liệu giả lập, mất khi tải lại trang.';
+  }
+  function laAdmin() { return S.toi && S.toi.nguoi.vai_tro === 'Admin'; }
+  // Phân quyền: mỗi mục '' (không thấy) · 'xem' · 'xu_ly'. Admin toàn quyền; mục không phân quyền (Hôm nay, Tài khoản) ai cũng vào được
+  function quyen(muc) {
+    if (laAdmin()) return 'xu_ly';
+    const q = S.toi && S.toi.quyen;
+    if (!q || !(muc in q)) return ['cai-dat', 'can-bo', 'nhat-ky'].indexOf(muc) >= 0 ? '' : 'xu_ly';
+    return q[muc] || '';
+  }
+  function coQuyen(muc, md) { const v = quyen(muc); return md === 'xu_ly' ? v === 'xu_ly' : !!v; }
+  const MUC_TRANG = { 'ts-tong-quan': 'tai-san', 'lich-phong-th': 'phong' }; // trang con → mục phân quyền
+  function khung() {
+    document.body.classList.add('in');
+    const n = S.toi.nguoi;
+    $('app').innerHTML = (DEMO ? '<div class="demo-bar">' + thanhDemo() + '</div>' : '') +
+      '<div class="layout' + (menuTuAn() ? ' tu-an' : '') + '" id="layout"><aside class="side" id="side"><button class="tab-menu" id="b-tab-menu" title="Hiện menu" aria-label="Hiện menu">☰</button>' +
+      '<div class="brand co-logo">' + logo() + '<b>Quản lý PTN</b><button class="ghim-menu" id="b-ghim-menu"></button></div>' +
+      '<nav class="nav" id="nav">' + MENU.filter(m => m[3] ? laAdmin() : coQuyen(MUC_TRANG[m[0]] || m[0], 'xem')).map(m => (NHOM_MENU[m[0]] ? '<div class="nav-nhom"><span data-t="' + NHOM_MENU[m[0]] + '">' + NHOM_MENU[m[0]] + '</span></div>' : '') +
+        '<a href="#/' + m[0] + '" data-m="' + m[0] + '" title="' + esc(m[2]) + '"><span class="ico">' + icon(m[0]) + '</span>' + m[2] + '</a>').join('') + '</nav>' +
+      (coQuyen('don', 'xem') && 'Notification' in window && Notification.permission === 'default' ? '<button class="bat-tb" id="b-bat-tb">🔔 Bật thông báo đơn mới trên máy này</button>' : '') +
+      '<div class="side-foot"><div class="av">' + esc((n.ten || '?').trim().split(' ').pop().charAt(0)) + '</div><div class="ai"><div class="who">' + esc(n.ten) + '</div><div class="role">' + esc(n.vai_tro) + ' · ' + esc(n.email) + '</div></div>' +
+      '<button id="b-thoat" title="Thoát">' + icon('thoat') + '</button></div></aside>' +
+      '<main class="main" id="main"></main></div>';
+    $('b-thoat').onclick = async () => { if (!confirm('Thoát khỏi hệ thống trên máy này?')) return; try { await api('dang_xuat'); } catch (e) { /* phiên đã hết */ } xoaTk(); S.tk = null; manDangNhap(); };
+    $('nav').addEventListener('click', () => $('side').classList.remove('open'));
+    datNutGhim();
+    $('b-ghim-menu').onclick = () => { const an = !$('layout').classList.contains('tu-an'); $('layout').classList.toggle('tu-an', an); $('side').classList.remove('open'); menuTuAn(an); datNutGhim(); };
+    $('b-tab-menu').onclick = () => $('side').classList.toggle('open');
+    const nutTB = $('b-bat-tb');
+    if (nutTB) nutTB.onclick = () => Notification.requestPermission().then(q => { nutTB.remove(); toast(q === 'granted' ? 'Đã bật thông báo đơn mới trên máy này' : 'Trình duyệt chưa cho phép thông báo', q !== 'granted'); });
+    theoDoiDon();
+  }
+  // ---------------- Báo có bản cập nhật hệ thống (trang mở lâu vẫn chạy mã cũ) ----------------
+  // So phien-ban.json (tạo khi đóng gói web) mỗi 5 phút / khi quay lại tab; khác lúc mở trang → dải báo "bấm để tải lại".
+  (function theoDoiPhienBan() {
+    if (DEMO || typeof fetch !== 'function' || typeof location === 'undefined' || location.protocol === 'file:') return;
+    let dau = null;
+    const kiem = () => fetch('../phien-ban.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(j => {
+      if (!j || !j.v) return; if (dau === null) { dau = j.v; return; }
+      if (j.v !== dau && !$('bao-cap-nhat')) { const b = document.createElement('div'); b.id = 'bao-cap-nhat'; b.className = 'bao-cap-nhat';
+        b.innerHTML = '🔄 Hệ thống vừa được cập nhật. <button type="button" class="btn sm">Tải lại trang</button>'; b.querySelector('button').onclick = () => location.reload(); document.body.appendChild(b); }
+    }).catch(() => { /* mất mạng: thử lại lần sau */ });
+    kiem(); setInterval(kiem, 300000); document.addEventListener('visibilitychange', () => { if (!document.hidden) kiem(); });
+  })();
+  // ---------------- Theo dõi đơn mới (hỏi máy chủ mỗi 15 giây khi trang đang mở) ----------------
+  // Có đơn chờ duyệt mới: thẻ báo góc phải (bấm để mở đơn), chuông, thông báo trên máy (nếu đã bật), số đếm trên menu và tiêu đề tab;
+  // đang ở trang Hôm nay / danh sách đơn thì tự tải lại. QR1, QR2 báo nổi bật (chuông 2 lần, thẻ màu cam).
+  const QR_GAP = ['QR1', 'QR2'], TIEU_DE = document.title;
+  function theoDoiDon() {
+    clearInterval(S.tdDon); S.donDaThay = null;
+    if (!coQuyen('don', 'xem') && !coQuyen('giang-vien', 'xem')) return;
+    S.kiemDon = async () => {
+      if (document.hidden || !S.tk || !$('nav')) return;
+      let r; try { r = await goiMayChu('don_moi'); } catch (e) { return; }
+      const a = document.querySelector('#nav a[data-m="don"]');
+      [[a, r.tong], [document.querySelector('#nav a[data-m="giang-vien"]'), r.gv || 0]].forEach(([el, n]) => { if (!el) return;
+        let h = el.querySelector('.huy-hieu'); if (!h) { h = document.createElement('span'); h.className = 'huy-hieu'; el.appendChild(h); } h.textContent = n; h.hidden = !n; });
+      const tong = r.tong + (r.gv || 0); document.title = (tong ? '(' + tong + ') ' : '') + TIEU_DE;
+      const cu = S.donDaThay, moi = cu ? r.moi.filter(d => !cu.has(d.id)) : [];
+      S.donDaThay = new Set(r.moi.map(d => d.id).concat(cu ? [...cu] : []));
+      if (!moi.length) return;
+      DEM.clear(); baoDonMoi(moi.reverse());
+      const o = document.activeElement, dangGo = o && /INPUT|TEXTAREA|SELECT/.test(o.tagName);
+      const tr = location.hash.replace(/^#\/?/, '').split('/');
+      if ((tr[0] === '' || tr[0] === 'tong-quan' || (tr[0] === 'don' && !tr[2]) || (tr[0] === 'giang-vien' && !tr[1])) && $('modal').classList.contains('hide') && !dangGo) dieuHuong();
+    };
+    S.kiemDon(); S.tdDon = setInterval(S.kiemDon, 15000);
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.kiemDon && S.tk) S.kiemDon(); });
+  function baoDonMoi(ds) {
+    let hop = $('tb-don');
+    if (!hop) { hop = document.createElement('div'); hop.id = 'tb-don'; document.body.appendChild(hop); }
+    const ten = (S.dm && S.dm.qr_don) || {}, gap = ds.some(d => QR_GAP.indexOf(d.qr) >= 0);
+    ds.forEach(d => {
+      const the = document.createElement('a'), noi = (d.phong ? ' · ' + d.phong : '') + ' · ' + ngayVN(d.tg);
+      the.className = 'the-don' + (QR_GAP.indexOf(d.qr) >= 0 ? ' gap' : ''); the.href = /^GV-/.test(d.qr) ? '#/giang-vien/' + encodeURIComponent(d.id) : '#/don/' + d.qr + '/' + encodeURIComponent(d.id);
+      the.innerHTML = '<b>🔔 ' + (/^GV-/.test(d.qr) ? 'Phiếu mới ' : 'Đơn mới ') + esc(d.qr) + '</b> – ' + esc(ten[d.qr] || '') + '<br>' + esc(d.ho_ten || '') + esc(noi) + '<span class="x" title="Đóng">×</span>';
+      the.onclick = (e) => { if (e.target.classList.contains('x')) e.preventDefault(); the.remove(); };
+      hop.prepend(the);
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try { const n = new Notification('Đơn mới ' + d.qr + ' – ' + (ten[d.qr] || ''), { body: (d.ho_ten || '') + noi, icon: '../icon-192.png', tag: d.id });
+          n.onclick = () => { window.focus(); location.hash = the.getAttribute('href'); n.close(); }; } catch (e) { /* máy không hỗ trợ */ }
+      }
+    });
+    while (hop.children.length > 6) hop.lastChild.remove();
+    chuong(gap ? 2 : 1);
+  }
+  function chuong(lan) {
+    try {
+      const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+      const c = chuong.c = chuong.c || new C();
+      for (let i = 0; i < lan; i++) [880, 660].forEach((f, j) => {
+        const o = c.createOscillator(), g = c.createGain(), t = c.currentTime + i * 0.45 + j * 0.16;
+        o.frequency.value = f; o.connect(g); g.connect(c.destination);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+        o.start(t); o.stop(t + 0.16);
+      });
+    } catch (e) { /* trình duyệt chặn âm thanh */ }
+  }
+  // danh sách để đi Trước / Tiếp ở trang chi tiết (trang danh sách gọi ganDieuHuong với các liên kết đang hiển thị)
+  function ganDieuHuong(ds, ten) { S.dh = { ds: ds.slice(), ten }; }
+  function nutDieuHuong() {
+    const h = location.hash.split('?')[0], d = S.dh, i = d ? d.ds.indexOf(h) : -1;
+    const lui = '<button class="btn o sm" id="b-lui" title="Quay lại trang trước">← Quay lại</button><button class="btn o sm" id="b-tiep" title="Đi tiếp trang sau">Tiếp →</button>';
+    if (i < 0) return lui;
+    return lui + '<span class="nav-ds"><a class="btn o sm' + (i ? '' : ' tat') + '" href="' + (d.ds[i - 1] || '#') + '" title="Mục trước">‹ Trước</a><span class="note">' + (i + 1) + ' / ' + d.ds.length + (d.ten ? ' ' + esc(d.ten) : '') + '</span>' +
+      '<a class="btn o sm' + (i < d.ds.length - 1 ? '' : ' tat') + '" href="' + (d.ds[i + 1] || '#') + '" title="Mục tiếp theo">Tiếp ›</a></span>';
+  }
+  function trang(tieuDe, nutPhai, crumb) {
+    const muc = S.muc, chiXem = muc && quyen(muc) === 'xem';
+    document.body.classList.toggle('chi-xem', !!chiXem);
+    $('main').innerHTML = '<div class="dh-thanh">' + nutDieuHuong() + '</div>' + (chiXem ? '<div class="chi-xem-bar">👁 Bạn có quyền <b>chỉ xem</b> mục này (xem, in, tải file). Cần nhập / sửa / duyệt: liên hệ admin để được cấp quyền xử lý.</div>' : '') + '<div class="top"><div>' + (crumb ? '<div class="crumb">' + crumb + '</div>' : '') + '<h1>' + tieuDe + '</h1></div><div class="btns"><button class="btn o sm menu-btn" id="b-menu">' + icon('menu') + ' Menu</button>' + (nutPhai || '') +
+      '<button class="btn o sm" id="b-xuat-trang" title="Bảng đang hiển thị theo biểu mẫu chuẩn: xem trước, in hoặc tải Excel" hidden>🖨 In / tải Excel</button></div></div><div id="nd"><div class="loading"><div class="spin"></div></div></div>';
+    $('b-menu').onclick = () => $('side').classList.toggle('open');
+    const nd = $('nd'), nutX = $('b-xuat-trang');
+    new MutationObserver(() => { nutX.hidden = !nd.querySelector('table'); if (chiXem) anNutGhi(nd); }).observe(nd, { childList: true, subtree: true });
+    if (chiXem) anNutGhi($('main'));
+    nutX.onclick = (e) => chay(e.target, () => xuatBangTrang(nd));
+    if ($('b-lui')) $('b-lui').onclick = () => { if (history.length > 1) history.back(); else location.hash = '#/tong-quan'; };
+    if ($('b-tiep')) $('b-tiep').onclick = () => history.forward();
+    window.scrollTo(0, 0);
+    return $('nd');
+  }
+  // Chế độ chỉ xem: ẩn các nút nhập / sửa / duyệt… (máy chủ vẫn chặn nếu gọi thẳng); nút xem, in, tải file giữ nguyên
+  const NUT_GHI = /^\s*(\+|⇪|Thêm|Sửa|Xóa|Lưu|Ghi|Nhập|Duyệt|Từ chối|Cấp|Tải lên|Tải file|Đặt|Xác nhận|Trả|Nhận|Hoàn|Chuyển|Tạo|Gán|Đổi|Xuất kho|Xuất \/|Hủy lô|Điều chỉnh|Kết thúc|Đánh dấu|Cập nhật|Đóng hồ sơ|Gia hạn|Bàn giao|Quét|Đồng bộ)/i;
+  function anNutGhi(root) {
+    root.querySelectorAll('button, a.btn').forEach(b => { if (!b.dataset.dong && !b.classList.contains('menu-btn') && b.id !== 'b-xuat-trang' && b.id !== 'b-lui' && NUT_GHI.test(b.textContent)) b.classList.add('an-ghi'); });
+    root.querySelectorAll('input.o-sua, td input, td select').forEach(i => { i.disabled = true; });
+    root.querySelectorAll('[data-ttt]').forEach(x => x.classList.add(x.textContent.trim() === 'đặt' ? 'an-ghi' : 'khoa-ghi')); // đặt tồn tối thiểu (kho): giữ số, bỏ liên kết
+  }
+  // Nút "In / tải Excel" ở mọi trang: mỗi bảng đang hiển thị thành một biểu mẫu chuẩn (đầu trang, tiêu đề, bảng kẻ ô, ngày lập, chữ ký) → xem trước, in, tải Excel
+  function xuatBangTrang(nd) {
+    const tieuDe = (($('main').querySelector('h1').firstChild || {}).textContent || 'Du lieu').trim(), dung = {};
+    const trangTinh = [...nd.querySelectorAll('table')].filter(tb => tb.offsetParent !== null).map(tb => {
+      const h2 = tb.closest('.card') && tb.closest('.card').querySelector('h2'), b = window.PTN_IN.tuBangHtml(tb), con = h2 ? h2.textContent.trim() : '';
+      let ten = (con || tieuDe).replace(/[\\/?*[\]:]/g, '-').trim().slice(0, 28) || 'Du lieu', k = ten, i = 1;
+      while (dung[k.toLowerCase()]) k = ten + ' ' + (++i);
+      dung[k.toLowerCase()] = 1;
+      const so = b.cot.map((_, j) => b.dong.some(r => typeof r[j] === 'number') && b.dong.every(r => r.length < 2 || typeof r[j] === 'number' || r[j] === ''));
+      return window.PTN_IN.bieuMau({ ten: k, tieuDe: (con && con !== tieuDe ? tieuDe + ' – ' + con : tieuDe).toUpperCase(), phuDe: 'Viện Công nghệ Sinh học và Thực phẩm – ' + b.dong.length + ' dòng, lập ngày ' + ngayVN(homNay()),
+        cot: b.cot.map((c, j) => ({ ten: c || ' ', so: so[j] })), dong: b.dong.map(r => r.length === 1 && b.cot.length > 1 ? { nhom: r[0] } : r), nguoiLap: S.toi.nguoi.ten });
+    });
+    if (!trangTinh.length) return toast('Trang này không có bảng dữ liệu', true);
+    window.PTN_IN.xemTruoc({ ten: boDau(tieuDe).replace(/[^a-z0-9]+/gi, ' ').trim() + ' ' + homNay(), trang: trangTinh });
+  }
+  function dieuHuong() {
+    if (!S.toi) return;
+    const p = (location.hash.replace(/^#\/?/, '').split('?')[0] || 'tong-quan').split('/');
+    if (p[0] === 'don' && /^GV-/.test(p[1] || '')) { location.replace('#/giang-vien/' + (p[2] || '')); return; } // mã QR trên phiếu giảng viên
+    document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.m === p[0]));
+    const muc = MUC_TRANG[p[0]] || p[0];
+    S.muc = (S.toi.muc_quyen || []).some(m => m[0] === muc) ? muc : '';
+    if (S.muc && !coQuyen(S.muc, 'xem')) {
+      const nd = trang('Không có quyền truy cập');
+      nd.innerHTML = '<div class="card empty">Tài khoản của bạn chưa được cấp quyền xem mục <b>' + esc(((S.toi.muc_quyen || []).find(m => m[0] === muc) || [])[1] || muc) + '</b>. Liên hệ admin để được phân quyền.<br><br><a class="btn sm" href="#/tong-quan">Về trang Hôm nay</a></div>';
+      return;
+    }
+    const r = {
+      'tong-quan': manTongQuan, 'ts-tong-quan': manTongQuan, 'phong': () => p[1] ? manPhong(decodeURIComponent(p[1])) : manDsPhong(),
+      'tai-san': () => p[1] ? manThietBi(decodeURIComponent(p[1])) : manTaiSan(), 'kiem-dinh': manKiemDinh,
+      'can-bo': manCanBo, 'nhat-ky': manNhatKy, 'tai-khoan': manTaiKhoan,
+      'don-qr': () => manDonQR(p[1] || 'QR1'), 'bieu-mau': manBieuMau,
+      'de-tai': () => manSapCo('de-tai'), 'bao-cao': () => manSapCo('bao-cao'),
+      'hoa-chat': () => manHoaChat(p[1] || 'hoc-ky', p[2] ? decodeURIComponent(p[2]) : ''),
+    };
+    Object.keys(TUYEN).forEach(k => { r[k] = () => TUYEN[k](p); });
+    const f = r[p[0]] || r['tong-quan'];
+    Promise.resolve(f()).catch(e => { const nd = $('nd'); if (nd) nd.innerHTML = '<div class="card">Lỗi: ' + esc(e.message) + '</div>'; });
+  }
+  window.addEventListener('hashchange', dieuHuong);
+  const phongTen = (ma) => { const p = (S.dm.phong || []).find(x => x.ma === ma); return p ? p.ten : ''; };
+  const dsPhongChon = (rong) => (rong ? [['', rong]] : []).concat((S.dm.phong || []).map(p => [p.ma, p.ma + ' – ' + p.ten]));
+
+  // ---------------- Tổng quan ----------------
+  async function manTongQuan() {
+    const nd = trang('Tổng quan tài sản');
+    const t = await api('tong_quan');
+    const tt = t.theo_tinh_trang;
+    const st = (n, l, cls, href) => '<div class="stat ' + (cls || '') + (href ? ' link" data-href="' + href : '') + '"><div class="n">' + n + '</div><div class="l">' + l + '</div></div>';
+    let h = '<div class="grid g4" style="margin-bottom:14px">' +
+      st(t.tong_tb, 'Thiết bị đang quản lý', '', '#/tai-san') +
+      st(tt['Đang cho mượn'] || 0, 'Đang cho mượn', '', '#/tai-san?tt=Đang cho mượn') +
+      st((tt['Hỏng – chờ sửa'] || 0) + (tt['Đang sửa'] || 0), 'Hỏng / đang sửa', (tt['Hỏng – chờ sửa'] || tt['Đang sửa']) ? 'bad' : 'ok', '#/tai-san?tt=hong') +
+      st(t.kiem_dinh.qua_han, 'Kiểm định quá hạn', t.kiem_dinh.qua_han ? 'bad' : 'ok', '#/kiem-dinh') +
+      st(t.kiem_dinh.trong_30, 'Kiểm định trong 30 ngày', t.kiem_dinh.trong_30 ? 'warn' : '', '#/kiem-dinh') +
+      st(t.bao_duong.qua_han + t.bao_duong.trong_30, 'Bảo dưỡng quá hạn / 30 ngày', (t.bao_duong.qua_han + t.bao_duong.trong_30) ? 'warn' : '', '#/kiem-dinh?bd=1') +
+      st(t.thieu_ma_ts, 'Thiết bị chưa có mã tài sản', t.thieu_ma_ts ? 'warn' : 'ok', '#/tai-san?thieu=1') + '</div>';
+    if (t.qua_han_tra.length || t.tu_qua_han.length) {
+      h += '<div class="card"><h2>Cần xử lý</h2>';
+      t.qua_han_tra.forEach(x => { h += '<div>⚠ <a href="#/tai-san/' + esc(x.id) + '">' + esc(x.ten) + '</a> – ' + esc(x.nguoi_muon) + ' quá hạn trả ' + hanTag(x.han_tra) + '</div>'; });
+      t.tu_qua_han.forEach(x => { h += '<div>⚠ Tủ <a href="#/phong/' + esc(x.phong) + '">' + esc(x.phong) + ' – ' + esc(x.so) + '</a> – ' + esc(x.nguoi) + ' quá hạn ' + hanTag(x.han) + '</div>'; });
+      h += '</div>';
+    }
+    h += '<h2 style="margin-top:6px">Phòng thí nghiệm</h2><div class="grid g3">' + t.phong.map(p =>
+      '<div class="card room" data-href="#/phong/' + esc(p.ma) + '"><div class="code">' + esc(p.ma) + '</div><div>' + esc(p.ten) + '</div>' +
+      '<div class="meta"><span>⚙ ' + p.tb + ' thiết bị</span><span>▣ Tủ: ' + p.tu_dung + ' đang dùng · ' + p.tu_trong + ' trống' + (p.tu_hong ? ' · ' + p.tu_hong + ' hỏng' : '') + '</span></div></div>').join('') + '</div>';
+    nd.innerHTML = h;
+    nd.querySelectorAll('[data-href]').forEach(el => { el.onclick = () => { location.hash = el.dataset.href; }; });
+  }
+
+  // ---------------- Đơn đăng ký QR ----------------
+  const QR_TEN = { QR1: 'Mượn phòng, TB – DC trong ngày', QR2: 'Mượn TB từ 02 ngày', QR3: 'Cấp hóa chất bổ sung', QR4: 'Mượn chìa khóa (Bảo vệ)',
+    QR5: 'Nhật ký sử dụng TB', QR6: 'Đăng ký tủ', QR7: 'Đăng ký KLTN – NCKH', QR8: 'Mượn thêm dụng cụ' };
+  const QR_COT_CHINH = { QR1: [/^Phòng/, /^Nội dung đăng ký/], QR2: [/^Thiết bị/, /^Ngày dự kiến trả/], QR3: [/^Tên học phần/, /^Hóa chất/],
+    QR4: [/^Phòng/, /^Giờ dự kiến/], QR5: [/^Phòng/, /^Thiết bị sử dụng/], QR6: [/^Phòng/, /^Ngày dự kiến trả/], QR7: [/^Tên đề tài/, /^Giảng viên hướng dẫn/] };
+  const MAU_DON = { 'Mới': 't-info', 'Đang xử lý': 't-warn', 'Quá hạn': 't-bad', 'Hoàn tất': 't-ok' };
+  const tagDon = (tt) => '<span class="tag ' + (MAU_DON[tt] || 't-gray') + '">' + esc(tt) + '</span>';
+  const daXong = (c, v) => v && v !== 'FALSE' && v !== 'TRUE';
+
+  async function manDonQR(qr) {
+    const tabs = Object.keys(QR_TEN).filter(k => k !== 'QR8').map(k => '<a class="btn sm ' + (k === qr ? 'chon' : 'o') + '" href="#/don-qr/' + k + '" title="' + esc(QR_TEN[k]) + '">' + k + '</a>').join('');
+    const nd = trang('Đơn cũ (Google Form) – ' + qr + ' · ' + esc(QR_TEN[qr] || ''), '', '<span class="btns">' + tabs + '</span>');
+    const d = await api('qr_ds', { qr, n: 1000 });
+    S.cache.qr = d;
+    const cTen = d.cot.find(c => /^Họ và tên/.test(c.ten)), cMa = d.cot.find(c => /^(MSSV|Mã viên chức)/.test(c.ten));
+    const cChinh = (QR_COT_CHINH[qr] || []).map(re => d.cot.find(c => c.loai === 'form' && re.test(c.ten))).filter(Boolean);
+    const ptn = d.cot.filter(c => c.loai === 'ptn');
+    const dem = (t) => d.hang.filter(h => h.tt === t).length;
+    nd.innerHTML = '<div class="tools"><input type="search" id="q" placeholder="Tìm tên, MSSV, phòng, nội dung…">' +
+      '<select id="f-tt"><option value="chua">Chưa xong (' + (dem('Mới') + dem('Đang xử lý') + dem('Quá hạn')) + ')</option><option value="Mới">Mới (' + dem('Mới') + ')</option><option value="Đang xử lý">Đang xử lý (' + dem('Đang xử lý') + ')</option>' +
+      '<option value="Quá hạn">Quá hạn (' + dem('Quá hạn') + ')</option><option value="Hoàn tất">Hoàn tất (' + dem('Hoàn tất') + ')</option><option value="">Tất cả (' + d.hang.length + ')</option></select>' +
+      '<label class="check" style="margin:0"><input type="checkbox" id="f-nghi"> Nghi đăng ký thay</label>' +
+      '<a class="btn o sm" href="' + esc(d.url) + '" target="_blank" rel="noopener">Mở Google Sheet</a></div><div id="kq"></div>' +
+      '<p class="note">Đơn gửi qua Google Form trước khi chuyển sang hệ thống mới. Đơn mới xem ở mục <a href="#/don">Đơn đăng ký QR1 – QR8</a>. Các nút ghi giờ / xác nhận ghi thẳng vào Google Sheet.</p>';
+    const ve = () => {
+      const q = boDau($('q').value), tt = $('f-tt').value, nghi = $('f-nghi').checked;
+      const l = d.hang.filter(h => (!q || boDau(h.gt.join(' ')).indexOf(q) >= 0) && (tt === '' ? true : tt === 'chua' ? h.tt !== 'Hoàn tất' : h.tt === tt) && (!nghi || h.nghi));
+      $('kq').innerHTML = !l.length ? '<div class="card empty">Không có đơn nào.</div>' : '<div class="tbl-wrap"><table><thead><tr><th>Thời gian</th><th>Người đăng ký</th>' +
+        cChinh.map(c => '<th>' + esc(c.ten.replace(/\s*\(.*$/, '')) + '</th>').join('') + '<th>Trạng thái</th><th>Xử lý của PTN</th></tr></thead><tbody>' +
+        l.map(h => '<tr class="click" data-r="' + h.r + '"><td style="white-space:nowrap">' + ngayVN(h.tg) + '</td><td><b>' + esc(cTen ? h.gt[cTen.i] : '') + '</b><div class="note">' + esc(cMa ? h.gt[cMa.i] : '') + '</div>' +
+          (h.nghi ? '<span class="tag t-bad" title="Một máy gửi cho nhiều người, hoặc một người gửi từ nhiều máy">⚠ nghi đăng ký thay</span>' : '') + '</td>' +
+          cChinh.map(c => '<td>' + esc(String(h.gt[c.i]).slice(0, 120)) + '</td>').join('') + '<td>' + tagDon(h.tt) + '</td><td>' +
+          ptn.map(c => {
+            const v = h.gt[c.i];
+            if (c.kieu === 'tick' || c.kieu === 'xac_nhan') return daXong(c, v) ? '<span class="tag t-ok" title="' + esc(c.ten) + '">✓ ' + esc(c.ten) + ' ' + esc(v.replace(/^Đã XN /, '')) + '</span> ' : '<button class="btn o sm" data-nhanh="' + h.r + ':' + c.i + '">' + esc(c.ten) + '</button> ';
+            return v ? '<span class="tag t-gray" title="' + esc(c.ten) + '">' + esc(c.ten) + ': ' + esc(v) + '</span> ' : '';
+          }).join('') + '</td></tr>').join('') + '</tbody></table></div>';
+      $('kq').querySelectorAll('tr[data-r]').forEach(tr => { tr.onclick = () => hopDon(qr, +tr.dataset.r); });
+      $('kq').querySelectorAll('[data-nhanh]').forEach(b => { b.onclick = async (e) => {
+        e.stopPropagation();
+        const [r, ci] = b.dataset.nhanh.split(':').map(Number), h = d.hang.find(x => x.r === r);
+        await chay(e.target, () => api('qr_xu_ly', { qr, r, tg: h.tg, cot: ci })); toast('Đã ghi'); dieuHuong();
+      }; });
+    };
+    ['q', 'f-tt', 'f-nghi'].forEach(id => { $(id).oninput = ve; $(id).onchange = ve; });
+    ve();
+  }
+
+  function hopDon(qr, r) {
+    const d = S.cache.qr, h = d.hang.find(x => x.r === r);
+    if (!h) return;
+    const form = d.cot.filter(c => c.loai === 'form' && h.gt[c.i] && !/^Cam kết/.test(c.ten) && !/email/i.test(c.ten));
+    const may = d.cot.find(c => c.loai === 'ma_may');
+    let html = '<h2>' + qr + ' – ' + esc(QR_TEN[qr]) + ' ' + tagDon(h.tt) + '</h2><p class="note">Gửi lúc ' + ngayVN(h.tg) + (may && h.gt[may.i] ? ' · Mã máy ' + esc(h.gt[may.i]) : ' · Không có mã máy (gửi trực tiếp Google Form)') + '</p>' +
+      (h.nghi ? '<p class="err">⚠ Mã máy này đã gửi đơn cho người khác, hoặc người này gửi từ nhiều máy – kiểm tra giấy tờ khi giao đồ.</p>' : '') +
+      '<dl class="kv" style="margin-bottom:14px">' + form.map(c => '<dt>' + esc(c.ten) + '</dt><dd>' + esc(h.gt[c.i]).replace(/\n/g, '<br>') + '</dd>').join('') + '</dl><h2>Xử lý của PTN</h2><div>';
+    d.cot.filter(c => c.loai === 'ptn').forEach(c => {
+      const v = h.gt[c.i], id = 'x' + c.i;
+      html += '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #EEF1F6"><div style="width:170px;font-weight:600">' + esc(c.ten) + '</div><div style="flex:1">';
+      if (c.kieu === 'tick' || c.kieu === 'xac_nhan') html += daXong(c, v) ? '<span class="tag t-ok">✓ ' + esc(v) + '</span> <button class="btn red sm" data-xoa="' + c.i + '">Hoàn tác</button>' : '<button class="btn sm" data-ghi="' + c.i + '">' + (c.kieu === 'xac_nhan' ? 'Xác nhận' : 'Ghi giờ') + '</button>';
+      else if (c.kieu === 'chon') html += '<select id="' + id + '"><option value="">— chọn —</option>' + c.lua_chon.map(x => '<option' + (x === v ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select> <button class="btn o sm" data-luu="' + c.i + '">Lưu</button>';
+      else html += '<input type="text" id="' + id + '" value="' + esc(v || (c.kieu === 'nguoi' ? S.toi.nguoi.ten : '')) + '" style="max-width:260px"> <button class="btn o sm" data-luu="' + c.i + '">Lưu</button>';
+      html += '</div></div>';
+    });
+    html += '</div><div class="modal-foot">' + (qr === 'QR3' ? '<button class="btn o" id="b-vao-bb">Đưa vào biên bản hóa chất</button>' : '') +
+      '<a class="btn o" href="' + esc(d.url) + '&range=A' + h.r + '" target="_blank" rel="noopener">Xem trong Google Sheet</a><button class="btn" data-dong>Đóng</button></div>';
+    moHop(html);
+    if ($('b-vao-bb')) $('b-vao-bb').onclick = () => hopDonVaoBB(d, h);
+    const lam = async (btn, data) => {
+      await chay(btn, () => api('qr_xu_ly', Object.assign({ qr, r: h.r, tg: h.tg }, data)));
+      toast('Đã ghi vào Google Sheet');
+      await manDonQR(qr); // tải lại danh sách rồi mở lại đơn đang xem
+      hopDon(qr, r);
+    };
+    $('modal-body').querySelectorAll('[data-ghi]').forEach(b => { b.onclick = (e) => lam(e.target, { cot: +b.dataset.ghi }); });
+    $('modal-body').querySelectorAll('[data-xoa]').forEach(b => { b.onclick = (e) => { if (confirm('Xóa giá trị đã ghi và trả lại ô tích?')) lam(e.target, { cot: +b.dataset.xoa, xoa: true }); }; });
+    $('modal-body').querySelectorAll('[data-luu]').forEach(b => { b.onclick = (e) => { const v = $('x' + b.dataset.luu).value; if (!v) return toast('Chưa nhập giá trị', true); lam(e.target, { cot: +b.dataset.luu, gia_tri: v }); }; });
+  }
+
+  // ---------------- Hóa chất – vật tư ----------------
+  const fmt = (n) => { const x = Math.round((+n || 0) * 100) / 100; return x ? x.toLocaleString('vi-VN') : ''; };
+  const hkMacDinh = () => S.hk || (S.dm.hoc_ky || [])[0] || '';
+  function chonHK(id) { return '<select id="' + id + '">' + (S.dm.hoc_ky || []).map(h => '<option' + (h === hkMacDinh() ? ' selected' : '') + '>' + esc(h) + '</option>').join('') + '</select>'; }
+  async function capNhatDanhMuc() { const r = await api('toi'); S.toi = r; S.dm = r.danh_muc; luuToi(r); }
+  // chọn file Excel → chọn trang tính → hàm xử lý nhận mảng hàng
+  // hộp tải file Excel: tự gắn link "Tải file mẫu" chuẩn (mau-file.js) theo loại file
+  const MAU_FILE_THEO_HOP = [[/^Nhập thời khóa biểu/, 'tkb'], [/^Tải file định mức hóa chất/, 'dinh_muc_hc'], [/^Tải file dụng cụ/, 'dung_cu'], [/^Nhập danh mục mã vật tư/, 'ma_vt'], [/^Tải file dự trù/, 'du_tru_mon']];
+  const linkMau = (ma) => window.PTN_MAU_FILE ? window.PTN_MAU_FILE.link(ma) : '';
+  function hopFileExcel(tieuDe, huongDan, xuLy, sheetGoiY) {
+    const mau = (MAU_FILE_THEO_HOP.find(x => x[0].test(tieuDe)) || [])[1];
+    moHop('<h2>' + esc(tieuDe) + '</h2><p class="note">' + huongDan + (mau ? linkMau(mau) : '') + '</p><label class="f"><span>File Excel</span><input type="file" id="x-file" accept=".xlsx,.xls,.xlsm"></label><div id="x-kq"></div>');
+    if (window.PTN_MAU_FILE) window.PTN_MAU_FILE.ganLink($('modal-body'));
+    $('x-file').onchange = async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      $('x-kq').innerHTML = '<div class="loading"><div class="spin"></div></div>';
+      try {
+        const X = await napXlsx(), wb = X.read(await file.arrayBuffer(), { cellDates: true });
+        const docSheet = (ten) => X.utils.sheet_to_json(wb.Sheets[ten], { header: 1, raw: true, defval: '', blankrows: true }); // giữ dòng trắng (ngăn vùng nhóm) // đọc thêm trang tính khác (file nhiều môn)
+        const chay1 = (ten) => { try { xuLy(docSheet(ten), ten, wb.SheetNames, docSheet); } catch (err) { $('x-kq').innerHTML = chonSheet(ten) + '<p class="err">' + esc(err.message) + '</p>'; ganSheet(); } };
+        const chonSheet = (ten) => wb.SheetNames.length > 1 ? '<label class="f"><span>Trang tính</span><select id="x-sheet">' + wb.SheetNames.map(n => '<option' + (n === ten ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select></label>' : '';
+        const ganSheet = () => { if ($('x-sheet')) $('x-sheet').onchange = (ev) => chay1(ev.target.value); };
+        hopFileExcel.chonSheet = chonSheet; hopFileExcel.ganSheet = ganSheet;
+        chay1(wb.SheetNames.find(n => sheetGoiY && sheetGoiY.test(n)) || wb.SheetNames[0]);
+      } catch (err) { $('x-kq').innerHTML = '<p class="err">' + esc(err.message) + '</p>'; }
+    };
+  }
+
+  async function manHoaChat(tab, phu) {
+    if (!coQuyen('hoa-chat', 'xem')) { location.hash = '#/tong-quan'; return; }
+    const TAB = [['hoc-ky', 'Học kỳ & thời khóa biểu'], ['mon', 'Môn & định mức'], ['vat-tu', 'Tra cứu mã vật tư'], ['du-tru-mon', 'Dự trù hóa chất ' + (hkMacDinh() || 'HK')], ['dung-cu', 'Dụng cụ các môn'], ['du-tru', 'Dự trù theo đợt']];
+    const nd = trang('Hóa chất – vật tư', '', '<span class="btns">' + TAB.map(t => '<a class="btn sm ' + (t[0] === tab ? 'chon' : 'o') + '" href="#/hoa-chat/' + t[0] + '">' + t[1] + '</a>').join('') + '</span>');
+    if (tab === 'mon') return phu ? manMon(nd, phu) : manDsMon(nd);
+    if (tab === 'vat-tu') return manVatTu(nd);
+    if (tab === 'du-tru' || tab === 'ke-hoach') return window.PTN_QL.manDuTru(nd);
+    if (tab === 'du-tru-mon') return window.PTN_QL.manDuTruMon(nd);
+    if (tab === 'dung-cu') return manDungCuMon(nd);
+    return manHocKy(nd);
+  }
+
+  // Thời khóa biểu gom theo môn thực hành: mỗi môn một dòng (số lớp học phần, nhóm, lớp, sĩ số, giảng viên, phòng, thời gian);
+  // một nhóm (mã LHP + nhóm) có thể có nhiều dòng lịch (đổi thứ / tuần) – sĩ số, số nhóm tính theo nhóm
+  function bangTheoMon(ds, tenMon) {
+    const khoaNhom = (l) => l.nhom ? l.ma_lhp + '|' + l.nhom : '#' + l.id, uniq = (a) => a.filter((x, i) => x && a.indexOf(x) === i);
+    const siSo = (a) => { const da = {}; return a.reduce((s, l) => { const k = khoaNhom(l); if (da[k]) return s; da[k] = 1; return s + (+l.si_so || 0); }, 0); };
+    const soNhom = (a) => new Set(a.map(khoaNhom)).size, tenM = (k) => k.charAt(0) === '~' ? k.slice(1) : tenMon[k] || k;
+    const g = {}; ds.forEach(l => { const k = l.mon || '~' + l.ten_mon; (g[k] = g[k] || []).push(l); });
+    const ks = Object.keys(g).sort((a, b) => tenM(a).localeCompare(tenM(b), 'vi'));
+    const ngay = (a) => { const bd = a.map(l => l.bat_dau).filter(Boolean).sort(), kt = a.map(l => l.ket_thuc).filter(Boolean).sort(); return bd.length ? ngayVN(bd[0]) + ' → ' + ngayVN(kt[kt.length - 1] || '') : ''; };
+    return '<p class="note"><b>' + ks.length + '</b> môn thực hành · <b>' + new Set(ds.map(l => l.ma_lhp)).size + '</b> lớp học phần · <b>' + soNhom(ds) + '</b> nhóm · ' + ds.length + ' dòng lịch · ' + siSo(ds) + ' lượt SV' +
+      ' <button class="btn o sm" id="b-mo-mon" style="margin-left:8px">Mở tất cả các môn</button></p><div class="tbl-wrap"><table class="tkb-mon"><thead><tr><th style="width:24px"></th><th>Môn thực hành</th><th class="num">Lớp HP</th><th class="num">Nhóm</th><th>Lớp</th><th class="num">Sĩ số</th><th>Giảng viên</th><th>Phòng</th><th>Thời gian</th></tr></thead>' +
+      ks.map(k => { const a = g[k].slice().sort((x, y) => (x.ma_lhp + x.nhom + x.bat_dau).localeCompare(y.ma_lhp + y.nhom + y.bat_dau)), khop = k.charAt(0) !== '~', tenTKB = uniq(a.map(l => l.ten_mon));
+        return '<tbody><tr class="click" data-mon="' + esc(k) + '"><td class="mui">▸</td><td><b>' + esc(tenM(k)) + '</b>' + (khop ? ' <a class="note" href="#/hoa-chat/mon/' + esc(k) + '">định mức ›</a>' : a[0].khong_du_tru ? ' <span class="tag t-gray">không cần dự trù</span>' : ' <span class="tag t-bad">chưa khớp môn định mức</span>') +
+          (khop && tenTKB.join('') !== tenM(k) ? '<div class="note">TKB: ' + esc(tenTKB.join('; ')) + '</div>' : '') + '</td><td class="num">' + new Set(a.map(l => l.ma_lhp)).size + '</td><td class="num">' + soNhom(a) + '</td><td>' + esc(uniq(a.map(l => l.lop)).join(', ')) + '</td>' +
+          '<td class="num">' + siSo(a) + '</td><td>' + esc(uniq(a.map(l => l.gv)).join('; ')) + '</td><td>' + esc(uniq(a.map(l => l.phong)).join(', ')) + '</td><td style="white-space:nowrap">' + ngay(a) + '</td></tr>' +
+          '<tr class="ct-mon" hidden><td></td><td colspan="8"><table class="tkb-ca"><thead><tr><th>Mã LHP</th><th>Lớp</th><th>Nhóm</th><th class="num">Sĩ số</th><th>Thứ – tiết</th><th>Thời gian</th><th>Phòng</th><th>Giảng viên</th></tr></thead><tbody>' +
+          a.map(l => '<tr><td class="mono">' + esc(l.ma_lhp) + '</td><td>' + esc(l.lop) + '</td><td>' + esc(l.nhom) + '</td><td class="num">' + esc(l.si_so) + '</td><td>' + esc(l.thu ? 'T' + l.thu + (l.tiet ? ' · tiết ' + l.tiet : '') : '') + '</td>' +
+            '<td style="white-space:nowrap">' + ngayVN(l.bat_dau) + ' → ' + ngayVN(l.ket_thuc) + '</td><td>' + esc(l.phong) + '</td><td>' + esc(l.gv) + '</td></tr>').join('') + '</tbody></table></td></tr></tbody>'; }).join('') + '</table></div>';
+  }
+  async function manHocKy(nd) {
+    if (!(S.dm.hoc_ky || []).length) {
+      nd.innerHTML = '<div class="card"><h2>Chưa có học kỳ</h2><p>Bước 1: tạo học kỳ. Bước 2: nhập thời khóa biểu thực hành (file "TH & Phòng học"). Bước 3: nhập định mức ở thẻ "Môn & định mức".</p><button class="btn" id="b-hk">+ Tạo học kỳ</button></div>';
+      $('b-hk').onclick = hopHocKy; return;
+    }
+    const hk = hkMacDinh(), [ds, mons] = await Promise.all([api('lop_ds', { hk }), api('mon_ds')]);
+    const tenMon = {}; mons.forEach(m => { tenMon[m.ma] = m.ten; });
+    // các file TKB đã tải vào học kỳ (cộng dồn)
+    const gTep = {}; ds.forEach(l => { const x = gTep[l.tep || ''] = gTep[l.tep || ''] || { tep: l.tep || '', so: 0, mon: new Set(), luc: '' }; x.so++; x.mon.add(l.ten_mon); if ((l.tai_luc || '') > x.luc) x.luc = l.tai_luc; });
+    const tepTKB = Object.keys(gTep).map(k => Object.assign(gTep[k], { mon: gTep[k].mon.size })).sort((a, b) => (b.luc || '').localeCompare(a.luc || ''));
+    const chua = ds.filter(l => !l.mon && !l.khong_du_tru), nhomChua = {}, khongDT = [...new Set(ds.filter(l => l.khong_du_tru).map(l => l.ten_mon))]; chua.forEach(l => { nhomChua[l.ten_mon] = (nhomChua[l.ten_mon] || 0) + 1; });
+    nd.innerHTML = '<div class="tools"><b>Học kỳ</b> ' + chonHK('f-hk') + '<button class="btn o sm" id="b-hk">+ Học kỳ</button><button class="btn sm" id="b-tkb">Nhập thời khóa biểu (file "TH & Phòng học")</button>' + (ds.length ? '<button class="btn o sm" id="b-xoa-tkb">Xóa toàn bộ TKB học kỳ</button>' : '') + '</div>' +
+      (tepTKB.length ? '<div class="card" style="margin-bottom:12px"><h2>File thời khóa biểu đã tải – ' + esc(hk) + ' (' + tepTKB.length + ' file, cộng dồn)</h2><div class="tbl-wrap"><table><thead><tr><th>File</th><th class="num">Dòng lịch</th><th class="num">Môn</th><th>Tải lúc</th><th></th></tr></thead><tbody>' +
+        tepTKB.map(x => '<tr><td><b>' + esc(x.tep || '(tải trước khi quản lý theo file)') + '</b></td><td class="num">' + x.so + '</td><td class="num">' + x.mon + '</td><td>' + esc(x.luc ? ngayVN(x.luc) : '') + '</td><td><button class="btn red sm o" data-xoa-tep="' + esc(x.tep) + '">Xóa file này</button></td></tr>').join('') +
+        '</tbody></table></div><p class="note">Mỗi bộ môn tải file thời khóa biểu của mình vào cùng học kỳ – các file được cộng dồn. Tải lại file cùng tên thì thay phần của file đó; dòng trùng với file khác được bỏ qua. Xóa / tải nhầm: thu hồi được ở Hệ thống › Lịch sử tải file.</p></div>' : '') +
+      (chua.length ? '<div class="card" style="border-color:#E7B4B0"><h2 style="color:var(--bad)">' + chua.length + ' ca chưa khớp môn có định mức</h2>' + Object.keys(nhomChua).map(t => '<div class="btns" style="margin-bottom:6px"><span>• ' + esc(t) + ' (' + nhomChua[t] + ' ca)</span><button class="btn o sm" data-gan="' + esc(t) + '">Gán môn…</button></div>').join('') + '<p class="note">Ca chưa khớp sẽ không được tính dự trù và không có biên bản. Môn không dùng hóa chất – dụng cụ (Yoga, lý thuyết…): bấm "Gán môn…" → chọn "Môn không cần dự trù".</p></div>' : '') +
+      (khongDT.length ? '<div class="card note" style="margin-bottom:12px"><b>Môn không cần dự trù hóa chất – dụng cụ (' + khongDT.length + '):</b> ' + khongDT.map(t => esc(t) + ' <button class="lnk" data-bo-kdt="' + esc(t) + '">bỏ đánh dấu</button>').join(' · ') + '</div>' : '') +
+      (ds.length ? bangTheoMon(ds, tenMon) : '<div class="card empty">Học kỳ này chưa có thời khóa biểu. Bấm "Nhập thời khóa biểu".</div>');
+    // bấm một môn → hiện / ẩn các lớp học phần, nhóm, dòng lịch của môn
+    nd.querySelectorAll('tr[data-mon]').forEach(tr => { tr.onclick = (e) => { if (e.target.closest('a')) return; const ct = tr.nextElementSibling; ct.hidden = !ct.hidden; tr.querySelector('.mui').textContent = ct.hidden ? '▸' : '▾'; }; });
+    if ($('b-mo-mon')) $('b-mo-mon').onclick = () => { const mo = [...nd.querySelectorAll('tr.ct-mon')].some(t => t.hidden);
+      nd.querySelectorAll('tr.ct-mon').forEach(t => { t.hidden = !mo; t.previousElementSibling.querySelector('.mui').textContent = mo ? '▾' : '▸'; }); $('b-mo-mon').textContent = mo ? 'Thu gọn tất cả' : 'Mở tất cả các môn'; };
+    $('f-hk').onchange = (e) => { S.hk = e.target.value; dieuHuong(); };
+    $('b-hk').onclick = hopHocKy;
+    nd.querySelectorAll('[data-xoa-tep]').forEach(b => { b.onclick = async (e) => { const tep = b.dataset.xoaTep;
+      if (!confirm('Xóa thời khóa biểu của file "' + (tep || '(tải trước khi quản lý theo file)') + '" khỏi ' + hk + '? Các file khác giữ nguyên.\n(Thu hồi lại được ở Hệ thống › Lịch sử tải file.)')) return;
+      const r = await chay(e.target, () => api('lop_xoa_tep', { hk, tep })); toast('Đã xóa ' + r.xoa + ' dòng lịch của file'); dieuHuong(); }; });
+    if ($('b-xoa-tkb')) $('b-xoa-tkb').onclick = async (e) => {
+      if (!confirm('Xóa TOÀN BỘ ' + ds.length + ' dòng lịch của ' + tepTKB.length + ' file trong ' + hk + '?\n(Muốn xóa một file thì dùng nút "Xóa file này". Biên bản đã tạo không bị xóa. Thu hồi lại được ở Hệ thống › Lịch sử tải file.)')) return;
+      const r = await chay(e.target, () => api('lop_xoa_hk', { hk })); toast('Đã xóa ' + r.xoa + ' ca – thu hồi được ở Lịch sử tải file'); dieuHuong();
+    };
+    const tenTep = () => ((($('x-file') || {}).files || [])[0] || {}).name || '';
+    $('b-tkb').onclick = () => hopFileExcel('Nhập thời khóa biểu thực hành – ' + hk, 'Chọn file thời khóa biểu (của Trường hoặc file "TH & Phòng học"; chỉ lấy ca thực hành). Mỗi bộ môn một file – các file của cùng học kỳ được <b>cộng dồn</b>; tải lại file cùng tên thì thay phần của file đó.', (rows, ten, all) => {
+      const l = docTKB(rows);
+      $('x-kq').innerHTML = hopFileExcel.chonSheet(ten) + '<p>Đọc được <b>' + l.length + '</b> dòng lịch thực hành (TH), ' + new Set(l.map(x => x.ten_mon)).size + ' môn, ' + new Set(l.map(x => x.ma_lhp.slice(0, 10))).size + ' học phần' +
+        (l.bo_lt ? '; <b>bỏ qua ' + l.bo_lt + ' dòng lý thuyết (LT)</b>' : '') + '.</p>' +
+        (tepTKB.some(x => x.tep && x.tep === tenTep()) ? '<p class="err">File cùng tên "' + esc(tenTep()) + '" đã tải vào ' + esc(hk) + ' – phần của file đó sẽ được thay bằng file này; các file khác giữ nguyên.</p>'
+          : tepTKB.length ? '<p class="note">Cộng dồn vào ' + esc(hk) + ' (đang có ' + tepTKB.length + ' file); dòng trùng với file khác được bỏ qua.</p>' : '') + (l.length ? '' : '<p class="err">Không có ca thực hành nào – kiểm tra lại trang tính / cột "Loại lịch".</p>') +
+        '<div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="x-ok">Nhập vào ' + esc(hk) + '</button></div>';
+      hopFileExcel.ganSheet();
+      $('x-ok').onclick = async (e) => { const r = await chay(e.target, () => api('lop_nhap', { hk, ds: l, dong_bo: true })); dongHop();
+        const tao = r.bien_ban ? r.bien_ban.reduce((a, b) => a + b.tao.length, 0) : 0, cn = r.bien_ban ? r.bien_ban.reduce((a, b) => a + b.cap_nhat.length, 0) : 0;
+        toast('Đã thêm ' + r.them + ' dòng lịch' + (r.thay ? ' (thay ' + r.thay + ' dòng của lần tải trước cùng file)' : '') + (r.trung ? ', bỏ ' + r.trung + ' dòng trùng file khác' : '') + (r.khong_khop_mon.length ? '; ' + r.khong_khop_mon.length + ' môn chưa khớp' : '') + (tao || cn ? ' · biên bản: ' + tao + ' tạo mới, ' + cn + ' cập nhật' : '')); dieuHuong(); };
+    }, /ph[oò]ng|th[ựu]c h[àa]nh/i);
+    nd.querySelectorAll('[data-gan]').forEach(b => { b.onclick = () => {
+      moHop('<h2>Gán môn cho "' + esc(b.dataset.gan) + '"</h2><form id="f">' + o('mon', 'Môn có định mức', { select: [['', '— Chọn môn —'], ['~khong', '⊘ Môn không cần dự trù hóa chất – dụng cụ']].concat(mons.map(m => [m.ma, m.ten + ' (' + m.so_hc + ' dòng HC)'])),
+        help: 'Chọn "Môn không cần dự trù" cho môn không dùng hóa chất – dụng cụ (VD: Yoga): hệ thống không báo "chưa khớp", không tính dự trù, không tạo biên bản – áp dụng cho môn này ở mọi học kỳ.' }) +
+        '<label class="check"><input type="checkbox" name="ma_lhp_vao_mon" checked> Ghi nhớ mã học phần cho các học kỳ sau</label><p class="note">Môn chưa có trong danh sách: tạo ở thẻ "Môn & định mức".</p><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Gán</button></div></form>');
+      $('f').onsubmit = async (e) => { e.preventDefault(); const v = giaTri(e.target); if (!v.mon) return toast('Chọn môn', true); await chay(e.submitter, () => api('lop_gan_mon', { hk, ten_mon: b.dataset.gan, mon: v.mon, ma_lhp_vao_mon: v.ma_lhp_vao_mon })); dongHop(); toast(v.mon === '~khong' ? 'Đã đánh dấu môn không cần dự trù' : 'Đã gán'); dieuHuong(); };
+    }; });
+    nd.querySelectorAll('[data-bo-kdt]').forEach(b => { b.onclick = async (e) => { if (!confirm('Bỏ đánh dấu "' + b.dataset.boKdt + '"? Môn sẽ hiện lại trong danh sách chưa khớp để gán môn định mức.')) return;
+      await chay(e.target, () => api('lop_gan_mon', { hk, ten_mon: b.dataset.boKdt, mon: '~co' })); toast('Đã bỏ đánh dấu'); dieuHuong(); }; });
+  }
+  function hopHocKy() {
+    const y = new Date().getFullYear();
+    moHop('<h2>Tạo học kỳ</h2><form id="f"><div class="form-grid">' + o('ky', 'Học kỳ', { select: ['HKI', 'HKII', 'HKH (hè)'] }) + o('nam', 'Năm học', { v: y + '-' + (y + 1), ph: '2026-2027' }) +
+      o('bat_dau', 'Bắt đầu', { type: 'date' }) + o('ket_thuc', 'Kết thúc', { type: 'date' }) + '</div><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Tạo</button></div></form>');
+    $('f').onsubmit = async (e) => {
+      e.preventDefault(); const v = giaTri(e.target);
+      if (!/^\d{4}-\d{4}$/.test(v.nam)) return toast('Năm học dạng 2026-2027', true);
+      const ma = v.ky.split(' ')[0] + ' ' + v.nam;
+      await chay(e.submitter, () => api('hk_luu', { hk: { ma, bat_dau: v.bat_dau, ket_thuc: v.ket_thuc } }));
+      await capNhatDanhMuc(); S.hk = ma; dongHop(); toast('Đã tạo ' + ma); dieuHuong();
+    };
+  }
+
+  async function manDsMon(nd) {
+    const ds = await api('mon_ds');
+    nd.innerHTML = '<div class="card" style="border-color:#F2D58A;background:#FFFBEA;margin-bottom:12px"><b>📌 Môn & định mức = định mức CHUẨN của từng môn, không phải dự trù của một học kỳ.</b>' +
+      '<ul style="margin:6px 0 0 18px;padding:0"><li>Hóa chất, vật tư tiêu hao tính cho <b>1 sinh viên</b>; dụng cụ tính cho <b>1 bộ giao 1 lớp thực hành</b> (gồm các nhóm của lớp; lớp nhận thêm bộ 2, 3 thì xuất biên bản bộ 2, 3 ở trang biên bản dụng cụ) – nhập một lần, dùng lại mọi học kỳ, chỉ sửa khi môn đổi bài.</li>' +
+      '<li>Số cần cho từng học kỳ = định mức × sĩ số theo thời khóa biểu: xem / lấy ở thẻ <a href="#/hoa-chat/du-tru-mon"><b>Dự trù hóa chất ' + esc(hkMacDinh() || 'HK') + '</b></a> (chọn môn → "Lấy dự trù từ định mức", không cần tải file).</li>' +
+      '<li>Biên bản bàn giao và dự trù theo đợt cũng tự tính từ định mức này.</li></ul></div>' +
+      '<div class="tools"><button class="btn sm" id="b-kh">⇪ Tải file định mức hóa chất (một hay nhiều môn)</button><button class="btn sm" id="b-dc">⇪ Tải file dụng cụ (một hoặc nhiều môn)</button><button class="btn o sm" id="b-mon">+ Môn</button>' + (laAdmin() ? '<button class="btn o sm" id="b-gop" title="Gộp môn trùng tên (do tải file tên viết khác) vào môn giữ lại">⇄ Gộp môn trùng</button><button class="btn red o sm" id="b-don" title="Xóa định mức, dự trù, biên bản lớp thực hành của các môn được chọn">🧹 Dọn dữ liệu</button>' : '') + (coQuyen('hoa-chat', 'xu_ly') ? '<button class="btn o sm" id="b-chuan-nhom" title="Xếp lại định mức hóa chất mọi môn về 3 nhóm: Hóa chất · Dược liệu · Vật tư tiêu hao">⇄ Chuẩn hóa nhóm (Hóa chất / Dược liệu / Vật tư tiêu hao)</button>' : '') + '</div>' +
+      '<p class="note">Định mức hóa chất tính cho <b>1 sinh viên</b>; định mức dụng cụ tính cho <b>1 bộ / 1 lớp thực hành</b>. Đây là dữ liệu cốt lõi, dùng lại cho mọi học kỳ. Môn nào có file thì tải lên môn đó – biên bản bàn giao và dự trù của học kỳ đang chọn tự cập nhật.</p>' +
+      (ds.length && laAdmin() ? '<div class="btns" style="margin-bottom:6px"><button class="btn red o sm" id="b-xoa-mon" disabled>🗑 Xóa môn đã chọn</button><span class="note">Xóa hẳn môn kèm định mức, dự trù, biên bản lớp thực hành; thời khóa biểu giữ nguyên (bỏ gán môn). Thu hồi được ở Lịch sử tải file.</span></div>' : '') +
+      (ds.length ? '<div class="tbl-wrap"><table><thead><tr>' + (laAdmin() ? '<th style="width:28px"><input type="checkbox" id="chon-het-mon" title="Chọn tất cả"></th>' : '') + '<th>Mã</th><th>Môn thực hành</th><th>Mã học phần</th><th class="num">Dòng hóa chất</th><th class="num">Dòng dụng cụ</th></tr></thead><tbody>' +
+        ds.map(m => '<tr class="click" data-ma="' + esc(m.ma) + '">' + (laAdmin() ? '<td><input type="checkbox" data-chon-mon="' + esc(m.ma) + '"></td>' : '') + '<td class="mono">' + esc(m.ma) + '</td><td><b>' + esc(m.ten) + '</b></td><td class="mono">' + esc(m.ma_hp) + '</td><td class="num">' + (m.so_hc || '<span class="tag t-warn">0</span>') + '</td><td class="num">' + (m.so_dc || '—') + '</td></tr>').join('') + '</tbody></table></div>'
+        : '<div class="card empty">Chưa có môn. Bấm "Nhập định mức hóa chất" và chọn file kế hoạch vật tư (ví dụ "KSK. KH vat HKI 2026.xlsm").</div>');
+    nd.querySelectorAll('tr[data-ma]').forEach(tr => { tr.onclick = (e) => { if (e.target.closest('input')) return; location.hash = '#/hoa-chat/mon/' + tr.dataset.ma; }; });
+    if ($('b-xoa-mon')) {
+      const capNhat = () => { const n = nd.querySelectorAll('[data-chon-mon]:checked').length; $('b-xoa-mon').disabled = !n; $('b-xoa-mon').textContent = '🗑 Xóa môn đã chọn' + (n ? ' (' + n + ')' : ''); };
+      nd.querySelectorAll('[data-chon-mon]').forEach(c => { c.onchange = capNhat; });
+      $('chon-het-mon').onchange = (e) => { nd.querySelectorAll('[data-chon-mon]').forEach(c => { c.checked = e.target.checked; }); capNhat(); };
+      $('b-xoa-mon').onclick = async (e) => {
+        const chon = [...nd.querySelectorAll('[data-chon-mon]:checked')].map(c => c.dataset.chonMon), ten = chon.map(m => ds.find(x => x.ma === m).ten);
+        if (!confirm('XÓA HẲN ' + chon.length + ' môn:\n• ' + ten.join('\n• ') + '\n\nXóa kèm định mức, dự trù mọi học kỳ, biên bản lớp thực hành (cả số liệu bàn giao), mã dự trù GV. Thời khóa biểu giữ nguyên (bỏ gán môn).\nThu hồi được ở Lịch sử tải file.')) return;
+        const r = await chay(e.target, () => api('mon_xoa', { ds: chon })); toast('Đã xóa ' + r.mon + ' môn · ' + r.dinh_muc + ' dòng định mức · ' + r.du_tru + ' dòng dự trù · ' + r.bien_ban + ' biên bản'); await capNhatDanhMuc(); dieuHuong(); };
+    }
+    $('b-mon').onclick = () => hopMon(null);
+    if ($('b-gop')) $('b-gop').onclick = () => {
+      // gợi ý cặp có thể trùng: tên (bỏ dấu, "TH", số thứ tự) trùng hẳn hoặc tên này chứa tên kia
+      const tso = (t) => boDau(t).replace(/^\s*\d+\s*[.)]\s*/, '').replace(/^th\s+/, '').replace(/[^a-z0-9]+/g, ' ').trim(), cap = [];
+      ds.forEach((a, i) => ds.slice(i + 1).forEach(b => { const x = tso(a.ten), y = tso(b.ten); if (x && y && (x === y || x.indexOf(y) >= 0 || y.indexOf(x) >= 0)) cap.push([a, b]); }));
+      const nhan = (m) => esc(m.ten) + ' (' + (m.so_hc || 0) + ' HC · ' + (m.so_dc || 0) + ' DC' + (m.ma_hp ? ' · ' + esc(m.ma_hp) : '') + ')';
+      const chon = (id, ph) => '<select id="' + id + '" style="width:100%"><option value="">— ' + ph + ' —</option>' + ds.map(m => '<option value="' + esc(m.ma) + '">' + nhan(m) + '</option>').join('') + '</select>';
+      moHop('<h2>⇄ Gộp môn trùng</h2><p class="note">Dùng khi một môn bị tạo hai lần (tải file có tên môn viết khác). Mọi dữ liệu của <b>môn trùng</b> – định mức hóa chất + dụng cụ, dự trù các học kỳ, lớp trong thời khóa biểu, mã / đề nghị dự trù của GV – ' +
+        'chuyển sang <b>môn giữ lại</b>, mã học phần ghép lại, rồi môn trùng bị xóa. Biên bản môn giữ lại tự cập nhật. Thu hồi được ở Lịch sử tải file.</p>' +
+        (cap.length ? '<div class="card" style="margin-bottom:10px"><b>Gợi ý các cặp có thể trùng</b> <span class="note">(bấm để chọn)</span><div>' + cap.map((c, i) => '<button type="button" class="btn o sm" data-cap="' + i + '" style="margin:4px 4px 0 0">' + esc(c[0].ten) + ' ⇄ ' + esc(c[1].ten) + '</button>').join('') + '</div></div>' : '<p class="note">Không thấy cặp tên nào giống nhau – chọn tay bên dưới.</p>') +
+        '<label class="f"><span>Môn trùng (bị gộp, sẽ xóa)</span>' + chon('gop-tu', 'Chọn môn trùng') + '</label><label class="f"><span>Gộp vào môn (giữ lại)</span>' + chon('gop-vao', 'Chọn môn giữ lại') + '</label>' +
+        '<div class="f"><span>Khi cả hai môn cùng có định mức (cùng loại) hoặc dự trù (cùng học kỳ)</span><label class="check"><input type="radio" name="gop-ut" value="vao" checked> Giữ của <b>môn giữ lại</b> (khuyên dùng)</label><label class="check"><input type="radio" name="gop-ut" value="tu"> Lấy của <b>môn trùng</b></label></div>' +
+        '<div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="b-gop-ok">Gộp môn</button></div>');
+      document.querySelectorAll('[data-cap]').forEach(b => { b.onclick = () => { const c = cap[+b.dataset.cap], it = (m) => (m.so_hc || 0) + (m.so_dc || 0);
+        const [vao, tu] = it(c[0]) >= it(c[1]) ? c : [c[1], c[0]]; $('gop-tu').value = tu.ma; $('gop-vao').value = vao.ma; }; }); // môn nhiều dữ liệu hơn là môn giữ lại
+      $('b-gop-ok').onclick = async (e) => {
+        const tu = $('gop-tu').value, vao = $('gop-vao').value, ut = document.querySelector('[name=gop-ut]:checked').value;
+        if (!tu || !vao) return toast('Chọn môn trùng và môn giữ lại', true); if (tu === vao) return toast('Hai môn phải khác nhau', true);
+        const t1 = ds.find(m => m.ma === tu).ten, t2 = ds.find(m => m.ma === vao).ten;
+        if (!confirm('Gộp "' + t1 + '" vào "' + t2 + '"?\nMôn "' + t1 + '" sẽ bị xóa sau khi chuyển dữ liệu.')) return;
+        const r = await chay(e.target, () => api('gop_mon', { tu, vao, uu_tien: ut })); dongHop();
+        toast('Đã gộp "' + r.tu + '" vào "' + r.vao + '": ' + r.dinh_muc + ' dòng định mức, ' + r.du_tru + ' dòng dự trù, ' + r.lop + ' dòng lịch TKB chuyển sang'); dieuHuong(); };
+    };
+    if ($('b-don')) $('b-don').onclick = () => {
+      moHop('<h2>🧹 Dọn dữ liệu</h2><p class="note">Đánh dấu các môn <b>cần dọn</b> – môn được đánh dấu bị xóa <b>định mức hóa chất + dụng cụ</b>, <b>dự trù hóa chất</b> (mọi học kỳ) và <b>biên bản bàn giao lớp thực hành</b> (hóa chất + dụng cụ, kèm lịch sử cấp phát). ' +
+        'Môn <b>không đánh dấu giữ nguyên</b>. Danh sách môn, thời khóa biểu không bị xóa. Xóa nhầm: thu hồi ở Lịch sử tải file.</p>' +
+        '<label class="check"><input type="checkbox" id="don-het"> Chọn tất cả</label><div style="max-height:320px;overflow:auto">' +
+        ds.map(m => '<label class="check"><input type="checkbox" data-xoa-mon="' + esc(m.ma) + '"> ' + esc(m.ten) + ' <span class="note">(' + (m.so_hc || 0) + ' HC · ' + (m.so_dc || 0) + ' DC)</span></label>').join('') +
+        '</div><div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn red" id="b-don-ok">Dọn – xóa dữ liệu các môn đã đánh dấu</button></div>');
+      $('don-het').onchange = (e) => document.querySelectorAll('[data-xoa-mon]').forEach(c => { c.checked = e.target.checked; });
+      $('b-don-ok').onclick = async (e) => {
+        const xoa = [...document.querySelectorAll('[data-xoa-mon]:checked')].map(c => c.dataset.xoaMon); if (!xoa.length) return toast('Đánh dấu ít nhất một môn cần dọn', true);
+        if (!confirm('Xóa định mức, dự trù, biên bản lớp thực hành của ' + xoa.length + ' môn đã đánh dấu? (' + (ds.length - xoa.length) + ' môn còn lại giữ nguyên)')) return;
+        const r = await chay(e.target, () => api('don_du_lieu', { xoa })); dongHop();
+        toast('Đã dọn: ' + r.dinh_muc + ' dòng định mức, ' + r.du_tru + ' dòng dự trù, ' + r.bien_ban + ' biên bản (' + r.dong_bb + ' dòng)'); dieuHuong(); };
+    };
+    if ($('b-chuan-nhom')) $('b-chuan-nhom').onclick = async (e) => { if (!confirm('Xếp lại định mức hóa chất của mọi môn về 3 nhóm (1. Hóa chất · 2. Dược liệu · 3. Vật tư tiêu hao), đánh lại STT?\nDự trù "lấy từ định mức" và biên bản cập nhật theo; thu hồi được ở Lịch sử tải file.')) return;
+      const r = await chay(e.target, () => api('dm_chuan_nhom')); toast(r.so_dong || r.ten_nhom ? 'Đã xếp lại ' + r.so_dong + ' dòng định mức của ' + r.so_mon + ' môn' + (r.ten_nhom ? ' · sửa tên nhóm ' + r.ten_nhom + ' dòng dự trù / biên bản' : '') + (r.bien_ban ? ' · cập nhật ' + r.bien_ban + ' biên bản' : '') : 'Định mức, dự trù, biên bản đã đúng 3 nhóm – không có gì thay đổi'); dieuHuong(); };
+    $('b-kh').onclick = () => nhapFileHC();
+    $('b-dc').onclick = () => nhapFileDC(ds);
+  }
+  // Tải file định mức của môn (hóa chất: file kế hoạch vật tư, một hay nhiều môn; dụng cụ: danh sách dụng cụ của một môn)
+  // → cập nhật định mức và tự tạo / cập nhật biên bản bàn giao của học kỳ đang chọn
+  function ketQuaDongBo(r, tieuDe) {
+    const b = r.bien_ban || {}, cn = b.cap_nhat || [];
+    moHop('<h2>' + esc(tieuDe) + '</h2><p>Đã cập nhật định mức <b>' + r.dong + '</b> dòng cho <b>' + r.mon.length + '</b> môn: ' + esc(r.mon.map(m => m.ten + (m.moi ? ' (môn mới)' : '')).join(', ')) + '.</p>' +
+      (b.hk ? '<h2 style="margin-top:12px">Biên bản bàn giao ' + esc(b.hk) + '</h2>' +
+        (b.khop_lop ? '<p class="note">Đã khớp thêm ' + b.khop_lop + ' ca thực hành với môn.</p>' : '') +
+        (b.tao.length ? '<p>✓ Tạo mới ' + b.tao.length + ' biên bản: ' + b.tao.map(id => '<a href="#/bien-ban/' + encodeURIComponent(id) + '" data-dong>' + esc(id) + '</a>').join(', ') + '</p>' : '') +
+        (cn.length ? '<p>✓ Cập nhật ' + cn.length + ' biên bản:</p><ul>' + cn.map(c => '<li><a href="#/bien-ban/' + encodeURIComponent(c.id) + '" data-dong>' + esc(c.id) + '</a> ' + esc(c.ten_mon) + ': ' +
+          [c.them && '+' + c.them + ' dòng mới', c.sua && c.sua + ' dòng đổi định mức / dự trù', c.xoa && c.xoa + ' dòng bỏ (chưa giao)', c.giu && c.giu + ' dòng đã giao nhưng không còn trong định mức (giữ lại, ⚠)', c.so_lai && 'xếp lại STT ' + c.so_lai + ' dòng'].filter(Boolean).join(' · ') + '</li>').join('') + '</ul>' : '') +
+        ((b.khong_lop || []).length ? '<div class="err" style="margin-top:8px">⚠ Chưa tạo được biên bản cho: <b>' + esc(b.khong_lop.join(', ')) + '</b> – môn chưa có lớp thực hành nào trong thời khóa biểu ' + esc(b.hk) + '.<br>' +
+          'Cách xử lý: vào <a href="#/hoa-chat/hoc-ky" data-dong>Học kỳ & thời khóa biểu</a> → "Gán môn" cho các lớp của môn này (hoặc tải lại file và chọn đúng môn có lớp trong TKB). Định mức đã lưu, biên bản sẽ tự tạo khi môn có lớp.</div>' : '') +
+        ((b.bo_qua || []).length ? '<div class="err" style="margin-top:8px">⚠ Chưa tạo biên bản: ' + b.bo_qua.map(esc).join('; ') + '</div>' : '') +
+        (!b.tao.length && !cn.length && !(b.khong_lop || []).length && !(b.bo_qua || []).length ? '<p class="note">Biên bản đã khớp với định mức / dự trù – không có gì thay đổi.</p>' : '')
+        : '<p class="note">Chưa có học kỳ – biên bản sẽ được tạo khi nhập thời khóa biểu.</p>') +
+      '<div class="modal-foot"><button class="btn" data-dong>Xong</button></div>');
+    dieuHuong();
+  }
+  // Tải file định mức hóa chất: mỗi môn trong file gắn vào một môn trên web (đoán theo mã học phần, rồi tên trùng hẳn);
+  // không khớp → để trống bắt chọn (môn cũ / "+ Tạo môn mới" / Bỏ qua) – không tự sinh môn trùng khi tên trong file khác tên cũ
+  async function nhapFileHC() {
+    const hk = hkMacDinh(), mons = await api('mon_ds'), tSo = (t) => boDau(t).replace(/^\s*\d+\s*[.)]\s*/, '').replace(/^th\s+/, '').replace(/[^a-z0-9]+/g, ' ').trim();
+    const doan = (m) => (mons.find(x => m.ma_hp.some(h => String(x.ma_hp || '').split(/[,;\s]+/).some(c => c && c.slice(0, 10) === h.slice(0, 10)))) || mons.find(x => tSo(x.ten) === tSo(m.ten)) || {}).ma || '';
+    hopFileExcel('Tải file định mức hóa chất', 'Chọn file kế hoạch vật tư theo mẫu P.KHĐT (khối "1. TH …", cột QUI CÁCH VẬT TƯ, MÃ VT, ĐVỊ, SLG/1HS) – file có thể chỉ gồm <b>một vài môn</b>. Định mức hóa chất của các môn có trong file được thay; biên bản hóa chất ' + esc(hk) + ' của các môn đó tự tạo / cập nhật. ' +
+      'Kiểm tra cột <b>"Môn trên web"</b>: môn không tự khớp (tên trong file khác tên trên web) thì chọn đúng môn cũ – chỉ chọn "+ Tạo môn mới" khi thật sự là môn mới.', (rows, ten) => {
+      const kh = docKeHoachVatTu(rows), tong = kh.reduce((a, m) => a + m.dm.length, 0);
+      kh.forEach(m => { m._chon = doan(m); });
+      const chon = (m, i) => '<select data-i="' + i + '"><option value="">— Chọn môn —</option>' + mons.map(x => '<option value="' + esc(x.ma) + '"' + (x.ma === m._chon ? ' selected' : '') + '>' + esc(x.ten) + '</option>').join('') +
+        '<option value="~moi">+ Tạo môn mới: ' + esc(m.ten) + '</option><option value="~bo">— Bỏ qua môn này —</option></select>';
+      $('x-kq').innerHTML = hopFileExcel.chonSheet(ten) + '<p>Đọc được <b>' + kh.length + '</b> môn, <b>' + tong + '</b> dòng định mức (' + kh.reduce((a, m) => a + m.dm.filter(d => !/^\d+$/.test(d.ma_vt)).length, 0) + ' dòng chưa có mã VT).</p>' +
+        '<div class="tbl-wrap" style="max-height:300px"><table><thead><tr><th>Môn trong file</th><th>Mã HP</th><th class="num">Lớp</th><th class="num">Dòng</th><th>Môn trên web</th></tr></thead><tbody>' +
+        kh.map((m, i) => '<tr><td>' + esc(m.ten) + '</td><td class="mono">' + esc(m.ma_hp.join(', ')) + '</td><td class="num">' + m.lop.length + '</td><td class="num">' + m.dm.length + '</td><td>' + chon(m, i) + '</td></tr>').join('') + '</tbody></table></div>' +
+        '<p class="note" id="x-nhac"></p><div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="x-ok">Cập nhật định mức + biên bản</button></div>';
+      hopFileExcel.ganSheet();
+      const nhac = () => { const c = kh.filter(m => !m._chon).length; $('x-nhac').innerHTML = c ? '<b style="color:var(--bad)">' + c + ' môn chưa khớp</b> – chọn môn cũ, "+ Tạo môn mới" hoặc "Bỏ qua".' : 'Mọi môn đã gắn vào môn trên web.'; };
+      $('x-kq').querySelectorAll('select[data-i]').forEach(sl => { sl.onchange = () => { kh[+sl.dataset.i]._chon = sl.value; nhac(); }; }); nhac();
+      $('x-ok').onclick = async (e) => {
+        if (kh.some(m => !m._chon)) return toast('Chọn môn trên web cho mọi môn (hoặc "Bỏ qua")', true);
+        const ds = kh.filter(m => m._chon !== '~bo').map(m => Object.assign({}, m, { mon: m._chon === '~moi' ? '' : m._chon, _chon: undefined, ten: m._chon === '~moi' ? m.ten : (mons.find(x => x.ma === m._chon) || m).ten }));
+        if (!ds.length) return toast('Không còn môn nào để cập nhật', true);
+        const trung = ds.map(m => m.mon).filter((x, i, a) => x && a.indexOf(x) !== i); if (trung.length) return toast('Hai môn trong file cùng gắn vào môn ' + (mons.find(x => x.ma === trung[0]) || {}).ten, true);
+        const r = await chay(e.target, () => api('dm_nhap', { loai: 'HC', ds, hk, dong_bo: true })); ketQuaDongBo(r, 'Đã cập nhật định mức hóa chất');
+      };
+    }, /HK|KH/i);
+  }
+  // ---------------- Dụng cụ các môn (dữ liệu gốc: 1 bộ / 1 lớp thực hành) ----------------
+  // Tải một hoặc nhiều file (mỗi file một môn), tự khớp môn; biên bản dụng cụ của học kỳ tự tạo / cập nhật theo danh sách gốc.
+  const tenMonSo = (s) => boDau(s).replace(/^th\s+/, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  async function lopTheoMon_(hk) { const c = {}; if (hk) (await api('lop_ds', { hk }).catch(() => [])).forEach(l => { if (l.mon) { const x = c[l.mon] = c[l.mon] || { nhom: {}, lop: {} }; x.nhom[l.nhom ? l.ma_lhp + '|' + l.nhom : l.id] = 1; x.lop[l.lop] = 1; } }); return c; }
+  async function nhapFileDC(ds, monChon) {
+    ds = ds || await api('mon_ds');
+    const hk = hkMacDinh(), coLop = await lopTheoMon_(hk);
+    ds = ds.slice().sort((a, b) => (coLop[b.ma] ? 1 : 0) - (coLop[a.ma] ? 1 : 0) || a.ten.localeCompare(b.ten, 'vi')); // môn có lớp trong TKB lên đầu
+    const goiYMon = (ten) => { const t = tenMonSo(ten); return !t ? null : ds.find(m => tenMonSo(m.ten) === t) || ds.find(m => coLop[m.ma] && (tenMonSo(m.ten).indexOf(t) >= 0 || t.indexOf(tenMonSo(m.ten)) >= 0)); };
+    const monTen = (ma) => (ds.find(m => m.ma === ma) || {}).ten || '';
+    moHop('<h2>Tải file dụng cụ các môn</h2><p class="note">Chọn <b>một hoặc nhiều file</b> (mỗi file danh sách dụng cụ của một môn – 1 bộ giao 1 lớp thực hành; cột "Tên dụng cụ", "Số lượng" hoặc "SL dự trù"). ' +
+      'Hệ thống tự khớp môn theo dòng "MÔN: …"; kiểm tra cột "Gắn vào môn" rồi bấm cập nhật. Danh sách gốc của môn được thay; biên bản dụng cụ ' + esc(hk) + ' tự tạo / cập nhật.' + linkMau('dung_cu') + '</p>' +
+      '<p class="note">Mỗi <b>sheet</b> có cột "Tên dụng cụ" được đọc thành một dòng (file nhiều sheet / nhiều môn cũng được) – bỏ chọn sheet không muốn nhập (nháp, bản cũ).</p><label class="f"><span>File Excel (chọn được nhiều file)</span><input type="file" id="x-file" multiple accept=".xlsx,.xls,.xlsm"></label><div id="x-kq"></div>');
+    if (window.PTN_MAU_FILE) window.PTN_MAU_FILE.ganLink($('modal-body'));
+    $('x-file').onchange = async (e) => {
+      const files = [...e.target.files]; if (!files.length) return;
+      $('x-kq').innerHTML = '<div class="loading"><div class="spin"></div></div>';
+      // mọi sheet của mọi file: sheet đọc được = một dòng (chọn / bỏ, gắn môn); sheet không đọc được → liệt kê kèm lý do
+      const X = await napXlsx(), ds2 = [], boQua = [];
+      for (const f of files) {
+        let wb; try { wb = X.read(await f.arrayBuffer(), { cellDates: true }); } catch (err) { boQua.push({ tep: f.name, sheet: '', loi: 'Không mở được file: ' + err.message }); continue; }
+        wb.SheetNames.forEach(ten => {
+          try { const dc = docDungCu(X.utils.sheet_to_json(wb.Sheets[ten], { header: 1, raw: true, defval: '' })); ds2.push({ tep: f.name, sheet: ten, dc }); }
+          catch (err) { boQua.push({ tep: f.name, sheet: ten, loi: err.message }); }
+        });
+      }
+      const mot = ds2.length === 1 && monChon;
+      ds2.forEach(x => { const g = mot ? { ma: monChon } : goiYMon(x.dc.ten) || goiYMon(x.sheet) || (files.length === 1 ? null : goiYMon(x.tep.replace(/\.[^.]+$/, ''))); x.mon = g ? g.ma : ''; x.chon = true; });
+      // nhiều sheet cùng khớp một môn (sheet nháp / bản cũ) → chỉ chọn sẵn sheet đầu
+      ds2.forEach((x, i) => { if (x.mon && ds2.slice(0, i).some(y => y.chon && y.mon === x.mon)) { x.chon = false; x.trung = 1; } });
+      const chonMon = (x, i) => '<select data-i="' + i + '"><option value="">— Chọn môn —</option>' + ds.map(m => '<option value="' + esc(m.ma) + '"' + (m.ma === x.mon ? ' selected' : '') + '>' + esc(m.ten + (coLop[m.ma] ? ' ✓' : ' (chưa có lớp trong TKB)')) + '</option>').join('') +
+        (x.dc.ten ? '<option value="~moi">+ Tạo môn mới: ' + esc(x.dc.ten) + '</option>' : '') + '</select>';
+      $('x-kq').innerHTML = (!ds2.length ? '<p class="err">Không có sheet nào đọc được danh sách dụng cụ.</p>' :
+        '<div class="tbl-wrap" style="max-height:340px"><table><thead><tr><th><input type="checkbox" id="x-chon-het" checked title="Chọn tất cả"></th><th>File › sheet</th><th>Môn trong sheet</th><th class="num">Dụng cụ</th><th>Gắn vào môn (✓ có lớp TH ' + esc(hk) + ')</th></tr></thead><tbody>' +
+        ds2.map((x, i) => '<tr><td><input type="checkbox" data-chon="' + i + '"' + (x.chon ? ' checked' : '') + '></td><td><span class="note">' + esc(x.tep) + ' ›</span> <b>' + esc(x.sheet) + '</b>' + (x.trung ? '<div class="note" style="color:var(--bad)">trùng môn với sheet trên – bỏ chọn sẵn</div>' : '') + '</td>' +
+          '<td>' + esc(x.dc.ten || '(không ghi)') + '</td><td class="num">' + x.dc.dm.length + '</td><td>' + chonMon(x, i) + '</td></tr>').join('') + '</tbody></table></div>') +
+        (boQua.length ? '<details style="margin-top:6px"><summary class="note">' + boQua.length + ' sheet không đọc được (bỏ qua)</summary><ul class="note" style="margin:4px 0 0 18px;padding:0">' +
+          boQua.map(x => '<li>' + esc(x.tep) + (x.sheet ? ' › <b>' + esc(x.sheet) + '</b>' : '') + ': ' + esc(x.loi) + '</li>').join('') + '</ul></details>' : '') +
+        '<p class="note" id="x-nhac"></p><div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="x-ok"' + (ds2.length ? '' : ' disabled') + '>Cập nhật danh sách gốc + biên bản</button></div>';
+      const nhac = () => { const ok = ds2.filter(x => x.chon), chua = ok.filter(x => !x.mon).length, k = ok.filter(x => x.mon && x.mon !== '~moi' && !coLop[x.mon]).length;
+        $('x-nhac').innerHTML = ds2.length + ' sheet đọc được · <b>' + ok.length + '</b> sheet đã chọn' + (chua ? ' · <b style="color:var(--bad)">' + chua + ' sheet chưa chọn môn</b>' : '') + (k ? ' · ' + k + ' môn chưa có lớp trong TKB ' + esc(hk) + ' (chỉ lưu danh sách, chưa tạo biên bản)' : ''); };
+      $('x-kq').querySelectorAll('select[data-i]').forEach(sl => { sl.onchange = () => { ds2[+sl.dataset.i].mon = sl.value; nhac(); }; });
+      $('x-kq').querySelectorAll('[data-chon]').forEach(c => { c.onchange = () => { ds2[+c.dataset.chon].chon = c.checked; nhac(); }; });
+      if ($('x-chon-het')) $('x-chon-het').onchange = (ev) => { ds2.forEach(x => { x.chon = ev.target.checked; }); $('x-kq').querySelectorAll('[data-chon]').forEach(c => { c.checked = ev.target.checked; }); nhac(); };
+      nhac();
+      $('x-ok').onclick = async (ev) => {
+        const ok = ds2.filter(x => x.chon); if (!ok.length) return toast('Chọn ít nhất một sheet', true);
+        if (ok.some(x => !x.mon)) return toast('Chọn môn cho mọi sheet đã chọn', true);
+        const trung = ok.map(x => x.mon).filter((m, i, a) => m !== '~moi' && a.indexOf(m) !== i); if (trung.length) return toast('Hai sheet cùng gắn vào môn ' + monTen(trung[0]) + ' – bỏ chọn một sheet', true);
+        const r = await chay(ev.target, () => api('dm_nhap', { loai: 'DC', hk, dong_bo: true, ds: ok.map(x => ({ mon: x.mon === '~moi' ? '' : x.mon, ten: x.mon === '~moi' ? x.dc.ten : monTen(x.mon), ma_hp: [], dm: x.dc.dm })) }));
+        ketQuaDongBo(r, 'Đã cập nhật danh sách dụng cụ gốc');
+      };
+    };
+  }
+  async function manDungCuMon(nd) {
+    const hk = hkMacDinh(), [ds, coLop, bb] = await Promise.all([api('mon_ds'), lopTheoMon_(hk), hk ? api('bb_ds', { hk }) : []]);
+    const bbDC = {}; bb.filter(b => b.loai === 'DC' && b.nhanh === 'Lớp thực hành').forEach(b => { bbDC[b.mon] = b; });
+    const l = ds.filter(m => coLop[m.ma] || m.so_dc).sort((a, b) => (coLop[b.ma] ? 1 : 0) - (coLop[a.ma] ? 1 : 0) || a.ten.localeCompare(b.ten, 'vi'));
+    const coTKB = l.filter(m => coLop[m.ma]), xuLy = coQuyen('hoa-chat', 'xu_ly');
+    nd.innerHTML = '<div class="card" style="border-color:#F2D58A;background:#FFFBEA;margin-bottom:12px"><b>📌 Dụng cụ các môn = dữ liệu gốc</b> (giống dự trù hóa chất): mỗi môn một danh sách dụng cụ cho <b>1 bộ giao 1 lớp thực hành</b>. ' +
+      'Tải file / sửa ở đây; <a href="#/bien-ban/dc">Biên bản bàn giao dụng cụ</a> ' + esc(hk) + ' tự tạo và cập nhật theo danh sách gốc – ở trang biên bản chỉ chọn môn theo lịch để in / tải. Lớp nhận thêm bộ 2, 3: nút "Xuất bộ 2, 3…" trong biên bản.</div>' +
+      '<div class="tools">' + (xuLy ? '<button class="btn sm" id="b-dc-nhieu">⇪ Tải file dụng cụ (một hoặc nhiều môn)</button><button class="btn o sm" id="b-dc-dong-bo" title="Cập nhật / tạo biên bản dụng cụ ' + esc(hk) + ' của mọi môn theo danh sách gốc hiện có">↻ Cập nhật biên bản theo danh sách gốc</button>' : '') + '<span class="note">' + linkMau('dung_cu') + '</span></div>' +
+      '<div class="grid g4" style="margin-bottom:14px">' + [[coTKB.length, 'Môn có lớp TH ' + hk, ''], [coTKB.filter(m => m.so_dc).length, 'Có danh sách dụng cụ', 'ok'], [coTKB.filter(m => !m.so_dc).length, 'Chưa có danh sách', coTKB.some(m => !m.so_dc) ? 'bad' : 'ok'],
+        [coTKB.filter(m => bbDC[m.ma]).length, 'Đã có biên bản dụng cụ', '']].map(x => '<div class="stat ' + x[2] + '"><div class="n">' + x[0] + '</div><div class="l">' + esc(x[1]) + '</div></div>').join('') + '</div>' +
+      (!l.length ? '<div class="card empty">Chưa có môn nào có lớp thực hành trong thời khóa biểu ' + esc(hk) + '.</div>' :
+        '<div class="tbl-wrap"><table><thead><tr><th>Môn thực hành</th><th>Mã HP</th><th class="num">Lớp / nhóm TH (' + esc(hk) + ')</th><th>Danh sách dụng cụ (gốc)</th><th>Biên bản dụng cụ</th><th></th></tr></thead><tbody>' +
+        l.map(m => { const c = coLop[m.ma], b = bbDC[m.ma];
+          return '<tr><td><b>' + esc(m.ten) + '</b></td><td class="mono">' + esc(m.ma_hp) + '</td><td class="num">' + (c ? Object.keys(c.lop).length + ' / ' + Object.keys(c.nhom).length : '<span class="note">không có lớp</span>') + '</td>' +
+            '<td>' + (m.so_dc ? '<span class="tag t-ok">' + m.so_dc + ' dụng cụ</span>' : '<span class="tag t-bad">Chưa có</span>') + '</td>' +
+            '<td>' + (b ? '<a href="#/bien-ban/' + encodeURIComponent(b.id) + '">' + esc(b.id) + '</a>' : '<span class="note">' + (c && m.so_dc ? 'chưa tạo' : '—') + '</span>') + '</td>' +
+            '<td class="btns"><a class="btn o sm" href="#/hoa-chat/mon/' + esc(m.ma) + '">Xem / sửa</a>' + (xuLy ? '<button class="btn o sm" data-tai-dc="' + esc(m.ma) + '">⇪ Tải file</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>');
+    if (window.PTN_MAU_FILE) window.PTN_MAU_FILE.ganLink(nd);
+    if ($('b-dc-nhieu')) $('b-dc-nhieu').onclick = () => nhapFileDC(ds);
+    if ($('b-dc-dong-bo')) $('b-dc-dong-bo').onclick = async (e) => { if (!confirm('Cập nhật biên bản dụng cụ ' + hk + ' của mọi môn theo danh sách gốc?\nDòng đã giao được giữ (⚠ nếu không còn trong danh sách); thu hồi được ở Lịch sử tải file.')) return;
+      const b = await chay(e.target, () => api('dc_dong_bo_bb', { hk })); toast('Biên bản dụng cụ: ' + b.tao.length + ' tạo mới, ' + b.cap_nhat.length + ' cập nhật theo danh sách gốc'); dieuHuong(); };
+    nd.querySelectorAll('[data-tai-dc]').forEach(b => { b.onclick = () => nhapFileDC(ds, b.dataset.taiDc); });
+  }
+  function hopMon(m) {
+    m = m || {};
+    moHop('<h2>' + (m.ma ? 'Sửa môn ' + esc(m.ma) : 'Thêm môn thực hành') + '</h2><form id="f">' + o('ten', 'Tên môn thực hành', { v: m.ten, req: 1 }) + o('ma_hp', 'Mã học phần (10 số, cách nhau dấu phẩy)', { v: m.ma_hp, help: 'Dùng để tự khớp với thời khóa biểu' }) +
+      o('bo_mon', 'Bộ môn', { select: ['', 'Công nghệ Sinh học', 'Công nghệ Thực phẩm', 'Quản lý chất lượng thực phẩm', 'Khác'], v: m.bo_mon }) + o('ghi_chu', 'Ghi chú', { v: m.ghi_chu }) + '<div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu</button></div></form>');
+    $('f').onsubmit = async (e) => { e.preventDefault(); const v = giaTri(e.target); v.ma = m.ma; const r = await chay(e.submitter, () => api('mon_luu', { mon: v })); dongHop(); toast('Đã lưu'); location.hash = '#/hoa-chat/mon/' + r.ma; dieuHuong(); };
+  }
+  async function manMon(nd, ma) {
+    const r = await api('mon_ct', { ma }), m = r.mon;
+    $('main').querySelector('h1').innerHTML = esc(m.ten);
+    const bang = (loai) => {
+      const l = r.dinh_muc.filter(d => d.loai === loai);
+      if (!l.length) return '<div class="note">Chưa có.</div>';
+      let nhom = '';
+      const hc = loai === 'HC', nCot = hc ? 9 : 8;
+      // hóa chất: ô chuyển nhóm từng dòng (hệ thống xếp nhầm thì chỉnh tay; dòng chỉnh tay có ✎, nút Chuẩn hóa nhóm không đổi lại)
+      const chonNhom = (d) => '<select data-doi-nhom="' + esc(d.id) + '" title="Chuyển nhóm">' + ['Hóa chất', 'Dược liệu', 'Vật tư tiêu hao'].map(n => '<option' + (n === d.nhom ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>' + (d.nhom_tay ? ' <span class="note" title="Nhóm chỉnh tay / ghi rõ trong file">✎</span>' : '');
+      return '<div class="tbl-wrap"><table><thead><tr><th>STT</th><th>Tên – quy cách</th><th>Mã VT</th><th>NSX</th><th>ĐVT</th><th class="num">' + (hc ? 'ĐM / 1 SV' : 'SL / 1 bộ (1 lớp)') + '</th><th>Ghi chú</th>' + (hc ? '<th>Nhóm</th>' : '') + '<th></th></tr></thead><tbody>' +
+        l.map(d => (d.nhom !== nhom ? (nhom = d.nhom, '<tr><td colspan="' + nCot + '" style="background:#F6F8FD;font-weight:600">' + esc(d.nhom) + '</td></tr>') : '') +
+          '<tr><td>' + esc(d.stt) + '</td><td>' + esc(d.ten) + (d.kiem_soat ? ' <span class="tag t-bad">kiểm soát</span>' : '') + '</td><td class="mono">' + (d.ma_vt ? esc(d.ma_vt) : '<span class="tag t-warn">chưa MVT</span>') + '</td><td>' + esc(d.nsx) + '</td><td>' + esc(d.dvt) + '</td><td class="num">' + fmt(d.dm) + '</td><td class="note">' + esc(d.ghi_chu) + '</td>' + (hc ? '<td style="white-space:nowrap">' + chonNhom(d) + '</td>' : '') +
+          '<td class="btns"><button class="btn o sm" data-sua="' + esc(d.id) + '">Sửa</button><button class="btn red sm" data-xoa="' + esc(d.id) + '">Xóa</button></td></tr>').join('') + '</tbody></table></div>';
+    };
+    nd.innerHTML = '<div class="crumb" style="margin-top:-8px"><a href="#/hoa-chat/mon">Môn & định mức</a> ›</div><div class="card"><dl class="kv"><dt>Mã môn</dt><dd>' + esc(m.ma) + '</dd><dt>Mã học phần</dt><dd class="mono">' + esc(m.ma_hp || '—') + '</dd><dt>Bộ môn</dt><dd>' + esc(m.bo_mon || '—') + '</dd></dl>' +
+      '<div class="btns" style="margin-top:10px"><button class="btn o sm" id="b-sua-mon">Sửa môn</button><button class="btn sm" id="b-them-dm">+ Thêm dòng định mức</button></div></div>' +
+      '<div class="card"><h2>Hóa chất · Dược liệu · Vật tư tiêu hao (định mức / 1 sinh viên)</h2>' + bang('HC') + '</div><div class="card"><h2>Dụng cụ (1 bộ / 1 lớp thực hành)</h2>' + bang('DC') + '</div>';
+    $('b-sua-mon').onclick = () => hopMon(m);
+    $('b-them-dm').onclick = () => hopDinhMuc({ mon: ma, loai: 'HC' }, r.dinh_muc);
+    nd.querySelectorAll('[data-sua]').forEach(b => { b.onclick = () => hopDinhMuc(r.dinh_muc.find(d => d.id === b.dataset.sua), r.dinh_muc); });
+    nd.querySelectorAll('[data-doi-nhom]').forEach(sl => { sl.onchange = async () => {
+      const d = r.dinh_muc.find(x => x.id === sl.dataset.doiNhom);
+      try { const k = await api('dm_luu', { dm: Object.assign({}, d, { nhom: sl.value }) }); toast('Đã chuyển "' + d.ten + '" sang nhóm ' + sl.value + ttBBDM(k)); }
+      catch (e) { toast(e.message, true); sl.value = d.nhom; return; }
+      dieuHuong(); }; });
+    nd.querySelectorAll('[data-xoa]').forEach(b => { b.onclick = async (e) => { if (!confirm('Xóa dòng định mức này?')) return; const r = await chay(e.target, () => api('dm_xoa', { id: b.dataset.xoa })); toast('Đã xóa' + ttBBDM(r)); dieuHuong(); }; });
+  }
+  const tenSo = (s) => boDau(s).replace(/[^a-z0-9]+/g, ' ').trim(); // so tên hóa chất: bỏ dấu, hoa thường, ký tự lạ
+  // sửa định mức từng dòng → biên bản lớp thực hành của môn đã cập nhật bao nhiêu
+  const ttBBDM = (r) => { const l = (r && r.bien_ban) || [], n = l.reduce((a, b) => a + b.tao.length + b.cap_nhat.length, 0), dt = (r && r.du_tru) || { lam_moi: [], rieng: [] };
+    return (dt.lam_moi.length ? ' · dự trù ' + dt.lam_moi.join(', ') + ' lấy lại theo định mức' : '') + (n ? ' · đã cập nhật ' + n + ' biên bản bàn giao' : '') +
+      (dt.rieng.length ? ' · ⚠ dự trù ' + dt.rieng.join(', ') + ' nhập riêng – biên bản theo dự trù đó; thêm dòng ở thẻ "Dự trù hóa chất"' : ''); };
+  // Loại / nhóm: Hóa chất · Dược liệu · Vật tư tiêu hao (cùng loại HC, định mức / 1 SV – đúng 3 nhóm của phiếu dự trù) · Dụng cụ (1 bộ / 1 lớp)
+  const NHOM_CHON = { HC: 'Hóa chất', DL: 'Dược liệu', VT: 'Vật tư tiêu hao', DC: 'Dụng cụ' };
+  const loaiChon = (x) => x.loai === 'DC' ? 'DC' : /d[uư][oợ]c li[eệ]u/i.test(x.nhom || '') ? 'DL' : /v[aậ]t t[uư]|ti[eê]u hao/i.test(x.nhom || '') ? 'VT' : 'HC';
+  function hopDinhMuc(d, ds) {
+    moHop('<h2>' + (d.id ? 'Sửa định mức' : 'Thêm định mức') + '</h2><form id="f"><div class="form-grid">' + o('loai', 'Loại', { select: [['HC', 'Hóa chất (/1 SV)'], ['DL', 'Dược liệu (/1 SV)'], ['VT', 'Vật tư tiêu hao (/1 SV)'], ['DC', 'Dụng cụ (1 bộ / 1 lớp)']], v: d.loai ? loaiChon(d) : 'HC' }) +
+      o('ten', 'Tên – quy cách', { v: d.ten, req: 1, full: 1 }) + o('ma_vt', 'Mã VT', { v: d.ma_vt }) + o('nsx', 'NSX', { v: d.nsx }) + o('dvt', 'ĐVT', { v: d.dvt }) + o('dm', 'Định mức', { v: d.dm, req: 1 }) +
+      o('stt', 'STT', { v: d.stt }) + o('ghi_chu', 'Ghi chú', { v: d.ghi_chu }) + '</div><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu</button></div></form>');
+    ganGoiYVT($('f'));
+    // tên đã có trong định mức của môn → báo ngay, không cho thêm trùng (STT tự đánh theo tên A → Z khi lưu)
+    const f = $('f'), oTen = f.querySelector('[name=ten]'), bao = document.createElement('div'); bao.className = 'err hide'; oTen.closest('label').after(bao);
+    const trung = () => (ds || []).find(x => x.id !== d.id && x.loai === (f.querySelector('[name=loai]').value === 'DC' ? 'DC' : 'HC') && tenSo(x.ten) === tenSo(oTen.value));
+    const kiem = () => { const t = trung(); bao.classList.toggle('hide', !t); bao.innerHTML = t ? '⚠ "' + esc(t.ten) + '" đã có trong định mức của môn (STT ' + esc(t.stt) + ', ' + fmt(t.dm) + ' ' + esc(t.dvt) + ') – bấm "Sửa" ở dòng đó để đổi số lượng.' : ''; return t; };
+    oTen.addEventListener('input', kiem); f.querySelector('[name=loai]').onchange = kiem;
+    f.querySelector('[name=stt]').closest('label').remove(); // STT tự đánh theo tên A → Z
+    f.onsubmit = async (e) => { e.preventDefault(); if (kiem()) return toast('Hóa chất đã có trong định mức', true); const v = giaTri(e.target); v.id = d.id; v.mon = d.mon; const chon = v.loai; v.loai = chon === 'DC' ? 'DC' : 'HC'; v.nhom = NHOM_CHON[chon]; // nhóm theo lựa chọn
+      const r = await chay(e.submitter, () => api('dm_luu', { dm: v })); dongHop(); toast('Đã lưu · STT ' + r.stt + ttBBDM(r) + (r.ma_vt ? ' · mã VT ' + r.ma_vt : ' · Chưa MVT')); dieuHuong(); };
+  }
+
+  async function manVatTu(nd) {
+    const ds = await api('vt_ds');
+    nd.innerHTML = '<div class="tools"><input type="search" id="q" placeholder="Tìm mã VT, tên hóa chất – vật tư…"><label class="check" style="margin:0"><input type="checkbox" id="f-ks"> Chỉ hóa chất kiểm soát đặc biệt</label><button class="btn sm" id="b-nhap-vt">Nhập danh mục mã VT</button><button class="btn o sm" id="b-cap-ma" title="Điền mã VT theo tên cho các dòng định mức, dự trù, biên bản, danh sách được cấp còn Chưa MVT">↻ Cập nhật mã VT cho định mức – dự trù</button></div>' +
+      '<p class="note">Danh mục mã vật tư của Trường. Khi tải danh mục lên (hoặc bấm "Cập nhật mã VT…"), hệ thống tự điền mã cho các dòng định mức, dự trù, biên bản đang "Chưa MVT" có tên trùng danh mục. Hóa chất – vật tư nhập tay: gõ tên để chọn từ gợi ý, mã tự điền; tên không có trong danh mục giữ "Chưa MVT".</p><div id="kq"></div>';
+    const ve = () => {
+      const q = boDau($('q').value), ks = $('f-ks').checked;
+      const l = ds.filter(v => (!q || boDau(v.ma_vt + ' ' + v.ten).indexOf(q) >= 0) && (!ks || v.kiem_soat));
+      $('kq').innerHTML = !ds.length ? '<div class="card empty">Chưa có danh mục. Bấm "Nhập danh mục mã VT" và chọn file "Ma vat tu- ma bai tap.xlsx".</div>' :
+        '<p class="note">' + l.length + ' / ' + ds.length + ' mã' + (l.length > 300 ? ' – hiện 300 dòng đầu, gõ để tìm' : '') + '</p><div class="tbl-wrap"><table><thead><tr><th>Mã VT</th><th>Tên – quy cách</th><th>NSX</th><th>ĐVT</th><th>Nhóm</th><th>Kiểm soát đặc biệt</th></tr></thead><tbody>' +
+        l.slice(0, 300).map(v => '<tr><td class="mono">' + esc(v.ma_vt) + '</td><td>' + esc(v.ten) + '</td><td>' + esc(v.nsx) + '</td><td>' + esc(v.dvt) + '</td><td>' + esc(v.nhom) + '</td><td><label class="check" style="margin:0"><input type="checkbox" data-ks="' + esc(v.ma_vt) + '"' + (v.kiem_soat ? ' checked' : '') + '> ' + (v.kiem_soat ? '<span class="tag t-bad">Có</span>' : '') + '</label></td></tr>').join('') + '</tbody></table></div>';
+      $('kq').querySelectorAll('[data-ks]').forEach(c => { c.onchange = async () => { try { const r = await api('vt_sua', { vt: { ma_vt: c.dataset.ks, kiem_soat: c.checked } }); ds.find(v => v.ma_vt === r.ma_vt).kiem_soat = r.kiem_soat; toast(c.checked ? 'Đã đánh dấu kiểm soát đặc biệt' : 'Đã bỏ đánh dấu'); ve(); } catch (e) { toast(e.message, true); } }; });
+    };
+    $('q').oninput = ve; $('f-ks').onchange = ve; ve();
+    $('b-cap-ma').onclick = async (e) => { const r = await chay(e.target, () => api('vt_cap_nhat_ma')); toast(r.tong ? 'Đã điền mã VT cho ' + r.tong + ' dòng (định mức ' + r.DINH_MUC + ', dự trù ' + r.DU_TRU_MON + ', biên bản ' + r.BB_DONG + ', được cấp ' + r.CAP_DU_TRU + ')' : 'Không còn dòng nào tra được mã theo tên'); };
+    $('b-nhap-vt').onclick = () => hopFileExcel('Nhập danh mục mã vật tư', 'Chọn file danh mục mã VT của Trường (cột "MÃ VẬT TƯ", "DANH MỤC VẬT TƯ", "ĐVỊ"…). Mã đã có được cập nhật, đánh dấu kiểm soát được giữ nguyên.', (rows, ten) => {
+      const vt = docMaVT(rows);
+      $('x-kq').innerHTML = hopFileExcel.chonSheet(ten) + '<p>Đọc được <b>' + vt.length + '</b> mã vật tư.</p><div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="x-ok">Nhập</button></div>';
+      hopFileExcel.ganSheet();
+      $('x-ok').onclick = async (e) => { const r = await chay(e.target, () => api('vt_nhap', { ds: vt })); dongHop(); toast(r.them + ' mã mới, ' + r.sua + ' cập nhật' + (r.ma_cap_nhat ? ' · tự điền mã cho ' + r.ma_cap_nhat + ' dòng định mức / dự trù / biên bản' : '')); dieuHuong(); };
+    }, /m[aã]\s*vt/i);
+  }
+
+  function napQR() {
+    if (window.qrcode) return Promise.resolve(window.qrcode);
+    return new Promise((ok, loi) => { const s = document.createElement('script'); s.src = 'qrcode.js'; s.onload = () => ok(window.qrcode); s.onerror = () => loi(new Error('Không tải được thư viện mã QR')); document.head.appendChild(s); });
+  }
+  // In theo bố cục biên bản bàn giao đang dùng (form chuẩn 1.7.6), có mã QR số biên bản ở góc để đối chiếu bản ký
+  // Đơn QR3 → biên bản hóa chất của học phần
+  async function hopDonVaoBB(d, h) {
+    const lay = (re) => { const c = d.cot.find(x => re.test(x.ten)); return c ? h.gt[c.i] : ''; };
+    const hk = hkMacDinh(); if (!hk) return toast('Chưa có học kỳ – tạo ở mục Hóa chất – vật tư', true);
+    const ds = (await api('bb_ds', { hk })).filter(b => b.loai === 'HC'), hp = boDau(lay(/^Tên học phần/));
+    const goiY = ds.find(b => hp && (boDau(b.ten_mon).indexOf(hp.replace(/^th\s+/, '')) >= 0 || hp.indexOf(boDau(b.ten_mon).replace(/^th\s+/, '')) >= 0));
+    // tách "Tên – 500 ml; Tên 2 – 10 g" thành từng dòng
+    const dong = String(lay(/^Hóa chất/)).split(/[;\n]+/).map(x => x.trim()).filter(Boolean).map(x => {
+      const m = /^(.*?)\s*[–-]\s*([\d.,]+)\s*(.*)$/.exec(x); return m ? { ten: m[1].trim(), sl: m[2].replace(',', '.'), dvt: m[3].trim() } : { ten: x, sl: '', dvt: '' };
+    });
+    const nguoi = lay(/^Họ và tên/) + (lay(/^Giảng viên dạy/) ? ' (GVTH ' + lay(/^Giảng viên dạy/) + ')' : '');
+    moHop('<h2>Đưa đơn QR3 vào biên bản hóa chất</h2><p class="note">Đơn ' + ngayVN(h.tg) + ' · ' + esc(nguoi) + ' · Học phần: ' + esc(lay(/^Tên học phần/)) + ' · Lớp HP: ' + esc(lay(/^Lớp học phần/)) + '</p><form id="f">' +
+      o('bb', 'Biên bản (' + esc(hk) + ')', { select: [['', '— Chọn biên bản —']].concat(ds.map(b => [b.id, b.ten_mon + ' (' + b.id + ')'])), v: goiY ? goiY.id : '' }) +
+      '<p class="note">Kiểm tra lại tên và số lượng tách từ đơn. Dòng trùng tên trong biên bản sẽ được cộng vào "Bổ sung"; hóa chất không có trong biên bản sẽ thêm dòng mới kèm ⚠.</p>' +
+      '<div class="tbl-wrap"><table><thead><tr><th>Tên hóa chất – vật tư</th><th style="width:110px">Số lượng</th><th style="width:90px">ĐVT</th></tr></thead><tbody id="dong-qr3">' +
+      dong.concat([{ ten: '', sl: '', dvt: '' }]).map(x => '<tr><td><input type="text" data-k="ten" value="' + esc(x.ten) + '"></td><td><input type="text" data-k="sl" value="' + esc(x.sl) + '"></td><td><input type="text" data-k="dvt" value="' + esc(x.dvt) + '"></td></tr>').join('') +
+      '</tbody></table></div><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Đưa vào biên bản</button></div></form>');
+    $('f').onsubmit = async (e) => {
+      e.preventDefault(); const bb = e.target.querySelector('[name=bb]').value; if (!bb) return toast('Chọn biên bản', true);
+      const ds2 = [...$('dong-qr3').querySelectorAll('tr')].map(tr => { const g = {}; tr.querySelectorAll('[data-k]').forEach(i => { g[i.dataset.k] = i.value.trim(); }); return g; }).filter(x => x.ten && +x.sl > 0);
+      const r = await chay(e.submitter, () => api('bb_nhap_don', { id: bb, qr: 'QR3', tg: h.tg, r: h.r, nguoi_dk: nguoi, ds: ds2 }));
+      dongHop(); toast('Đã cộng ' + r.ket_qua.length + ' dòng vào ' + bb + (r.ket_qua.some(k => k.dong_moi) ? ' (có dòng mới ⚠)' : ''));
+    };
+  }
+
+  // ---------------- Biểu mẫu PTN (tải về) ----------------
+  const BIEU_MAU = [
+    ['Đơn KLTN – luận văn (Phụ lục 1, Quy định PTN 2026)', [['PL1A_Don-de-nghi-muon-dung-cu_KLTN_luan-van.docx', 'Phụ lục 1A – Đơn đề nghị mượn dụng cụ'], ['PL1B_Don-de-nghi-muon-phong-thi-nghiem_KLTN_luan-van.docx', 'Phụ lục 1B – Đơn đề nghị mượn phòng thí nghiệm'], ['PL1C_Don-de-nghi-muon-thiet-bi_KLTN_luan-van.docx', 'Phụ lục 1C – Đơn đề nghị mượn thiết bị']]],
+    ['Đơn NCKH (Phụ lục 2)', [['PL2A_Don-de-nghi-muon-dung-cu_NCKH.docx', 'Phụ lục 2A – Đơn đề nghị mượn dụng cụ'], ['PL2B_Don-de-nghi-muon-phong-thi-nghiem_NCKH.docx', 'Phụ lục 2B – Đơn đề nghị mượn phòng thí nghiệm'], ['PL2C_Don-de-nghi-muon-thiet-bi_NCKH.docx', 'Phụ lục 2C – Đơn đề nghị mượn thiết bị']]],
+    ['Sinh viên ngoài đơn vị (Phụ lục 3)', [['PL3_Don-dang-ky-su-dung-PTN_SV-ngoai-don-vi.docx', 'Phụ lục 3 – Đơn đăng ký sử dụng phòng thí nghiệm']]],
+    ['Giảng viên – thiết bị', [['Don-de-nghi-muon-thiet-bi-dai-ngay_GV_Mau-QR2.docx', 'Đơn đề nghị mượn thiết bị dài ngày (mẫu QR2)'], ['Bieu-mau-bao-hong-thiet-bi.docx', 'Biểu mẫu báo hỏng thiết bị'], ['Phieu-de-nghi-sua-chua-thiet-bi.docx', 'Phiếu đề nghị sửa chữa thiết bị'], ['Phieu-de-nghi-bo-sung-thiet-bi.docx', 'Phiếu đề nghị bổ sung thiết bị'], ['Bien-ban-ban-giao-thiet-bi-PTN-cho-giang-vien.docx', 'Biên bản bàn giao thiết bị cho giảng viên'], ['Giay-bao-mang-tai-san-vao-ra-co-quan_TCHC-mau-28.docx', 'Giấy báo mang tài sản vào / ra cơ quan (mẫu của Trường – TCHC mẫu số 28)'], ['Phieu-de-nghi-giai-quyet-cong-viec_mang-tai-san-ra.docx', 'Phiếu đề nghị giải quyết công việc (tờ trình BGH) – kèm giấy báo mang tài sản ra']]]
+  ];
+  function manBieuMau() {
+    const nd = trang('Biểu mẫu PTN');
+    nd.innerHTML = '<p class="note">Các mẫu này cũng hiện ở trang công khai (mục Biểu mẫu PTN) cho sinh viên, giảng viên tải về. Sinh viên làm KLTN – NCKH dùng QR7 để có đơn Phụ lục 1A – 3 điền sẵn.</p>' +
+      BIEU_MAU.map(g => '<div class="card"><h2>' + esc(g[0]) + '</h2><ul class="files">' + g[1].map(f => '<li><span>📄 ' + esc(f[1]) + '</span><a class="btn o sm" href="../bieu-mau/' + f[0] + '" download>Tải về (.docx)</a></li>').join('') + '</ul></div>').join('');
+  }
+
+  // ---------------- Các mục đang xây dựng ----------------
+  const SAP_CO = {
+    'de-tai': ['Hồ sơ đề tài KLTN – NCKH', 'Giai đoạn 3', ['QR7 mới: sinh viên khai đề tài, GVHD, danh sách nhóm, chọn đơn cần làm (mượn phòng / thiết bị / dụng cụ).',
+      'Hệ thống tự điền và trả về file đơn đúng mẫu Phụ lục 1A – 3 để in, đề nghị GVHD ký, nộp PTN.', 'Cán bộ quét mã QR trên đơn giấy → mở đúng hồ sơ → "Đã nhận đơn ký" → Duyệt.',
+      'Theo dõi dụng cụ, thiết bị, tủ, chìa khóa của từng nhóm; chỉ đóng hồ sơ khi đã trả đủ.', 'Minh chứng đề tài NCKH: upload (không bắt buộc). Phụ lục 3: in lệ phí + trạng thái "Đã thu phí".']],
+    'hoa-chat': ['Hóa chất – vật tư', 'Giai đoạn 4', ['Danh mục vật tư theo mã VT của Trường (~3.600 mã, nhập từ file "Mã vật tư – mã bài tập"); đánh dấu hóa chất kiểm soát đặc biệt.',
+      'Định mức theo bài thực hành (mã BT) – dữ liệu cốt lõi.', 'Upload thời khóa biểu thực hành → tự tính kế hoạch vật tư (theo học kỳ hoặc theo tháng) → xuất đúng mẫu gửi P.KHĐT.',
+      'Kho hóa chất F4.01: nhập – xuất – tồn, cảnh báo sắp hết / hết hạn, lưu COA; sổ theo dõi tiền chất.']],
+    'bien-ban': ['Biên bản bàn giao', 'Giai đoạn 4', ['Tự tạo biên bản hóa chất, dụng cụ cho từng lớp học phần theo form chuẩn; tải về in, soạn, giao lớp.',
+      'Cây thư mục Năm học → Học kỳ → Môn → Lớp.', 'QR3 cấp bổ sung cộng thẳng vào biên bản hóa chất; hóa chất ngoài danh sách → thêm dòng + cảnh báo.',
+      'Biên bản dụng cụ 2 nhánh: lớp thực hành và KLTN – NCKH; QR8 mượn thêm ghi thẳng vào biên bản, ghi chú người mượn; theo dõi trả – còn nợ.',
+      'Upload bản đã ký (nhận đúng biên bản nhờ mã QR ở góc); đọc thử số trên bản scan, tô vàng ô khác với số trên web.']],
+    'bao-cao': ['Báo cáo – thống kê', 'Giai đoạn 5', ['Dashboard riêng từng thiết bị: số lần, số giờ sử dụng, ai dùng nhiều, tỷ lệ khai thác, hỏng – sửa – kiểm định.',
+      'Báo cáo tháng tự động (ngày 1 hằng tháng) – Excel và Word/PDF – lưu Drive theo năm học.', 'Tần suất dùng phòng; dự trù – thực cấp hóa chất; dụng cụ còn nợ; vi phạm; số liệu mẫu báo cáo KH&CN gửi P.QLKH.']],
+    'qr8': ['QR8 – Đăng ký mượn thêm dụng cụ', 'Giai đoạn 3', ['Sinh viên / giảng viên chọn: Lớp thực hành (chọn lớp học phần) hoặc KLTN – NCKH (hệ thống nhận ra nhóm qua MSSV).',
+      'Chọn dụng cụ từ biên bản dụng cụ của lớp / nhóm, nhập số lượng, ngày trả.', 'Cán bộ giao → ghi thẳng vào biên bản dụng cụ đúng nhánh, kèm ghi chú người mượn; nhận trả → tính còn nợ.']]
+  };
+  function sapCoHtml(k) {
+    const s = SAP_CO[k];
+    return '<div class="card"><span class="tag t-warn">Đang xây dựng – ' + esc(s[1]) + '</span><h2 style="margin-top:10px">' + esc(s[0]) + '</h2><p class="note">Theo Bản ý tưởng v4 (bản chốt), mục này sẽ gồm:</p><ul>' + s[2].map(x => '<li style="margin-bottom:6px">' + esc(x) + '</li>').join('') + '</ul></div>';
+  }
+  function manSapCo(k) { const nd = trang(esc(SAP_CO[k][0])); nd.innerHTML = sapCoHtml(k); }
+
+  // ---------------- Phòng ----------------
+  async function manDsPhong() {
+    const nd = trang('Phòng thí nghiệm', laAdmin() ? '<button class="btn sm" id="b-them-phong">+ Thêm phòng</button>' : '');
+    const ds = await api('phong_ds');
+    nd.innerHTML = '<div class="grid g3">' + ds.map(p => '<div class="card room" data-href="#/phong/' + esc(p.ma) + '"><div class="code">' + esc(p.ma) + '</div><div>' + esc(p.ten) + '</div>' +
+      '<div class="meta"><span>⚙ ' + p.so_tb + ' thiết bị</span><span>▣ ' + p.tu_dung + '/' + p.tu_tong + ' tủ đang dùng</span></div>' +
+      (p.phu_trach ? '<div class="note" style="margin-top:6px">Phụ trách: ' + esc(p.phu_trach) + '</div>' : '') + '</div>').join('') + '</div>';
+    nd.querySelectorAll('[data-href]').forEach(el => { el.onclick = () => { location.hash = el.dataset.href; }; });
+    if ($('b-them-phong')) $('b-them-phong').onclick = () => hopPhong(null);
+  }
+  function hopPhong(p) {
+    const moi = !p; p = p || { so_tu: 20 };
+    moHop('<h2>' + (moi ? 'Thêm phòng' : 'Sửa thông tin phòng ' + esc(p.ma)) + '</h2><form id="f"><div class="form-grid">' +
+      o('ma', 'Mã phòng', { v: p.ma, req: 1, ph: 'F6.08', extra: moi ? '' : ' readonly' }) + o('so_tu', 'Số tủ', { type: 'number', v: p.so_tu, help: 'Tăng số tủ sẽ tạo thêm tủ; không tự xóa tủ đang có' }) +
+      o('ten', 'Tên phòng', { v: p.ten, req: 1, full: 1 }) + o('vi_tri', 'Vị trí', { v: p.vi_tri }) + o('dien_tich', 'Diện tích (m²)', { v: p.dien_tich }) +
+      o('phu_trach', 'Cán bộ phụ trách', { v: p.phu_trach, full: 1 }) + o('chuc_nang', 'Chức năng', { v: p.chuc_nang, area: 1, full: 1 }) + o('ghi_chu', 'Ghi chú', { v: p.ghi_chu, full: 1 }) +
+      '</div><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu</button></div></form>');
+    $('f').onsubmit = async (e) => {
+      e.preventDefault();
+      await chay(e.submitter, () => api('phong_luu', { moi, phong: giaTri(e.target) }));
+      S.dm = (await api('toi')).danh_muc; dongHop(); toast('Đã lưu phòng'); dieuHuong();
+    };
+  }
+  async function manPhong(ma) {
+    const nd = trang('Phòng ' + esc(ma), (laAdmin() ? '<button class="btn o sm" id="b-sua-phong">Sửa thông tin phòng</button>' : '') + '<button class="btn sm" id="b-them-tb">+ Thêm thiết bị vào phòng</button>',
+      '<a href="#/phong">Phòng thí nghiệm</a> ›');
+    const r = await api('phong_ct', { ma }), p = r.phong, hn = homNay();
+    let h = '<div class="card"><h2>' + esc(p.ten) + '</h2><dl class="kv">' +
+      [['Vị trí', p.vi_tri], ['Chức năng', p.chuc_nang], ['Cán bộ phụ trách', p.phu_trach], ['Diện tích', p.dien_tich ? p.dien_tich + ' m²' : ''], ['Ghi chú', p.ghi_chu]]
+        .filter(x => x[1]).map(x => '<dt>' + x[0] + '</dt><dd>' + esc(x[1]) + '</dd>').join('') + '</dl></div>';
+    h += '<div class="card"><div class="btns" style="justify-content:space-between"><h2 style="margin:0">Sơ đồ tủ (' + r.tu.length + ')</h2>' + (coQuyen('phong', 'xu_ly') ? '<button class="btn o sm" id="b-them-tu">+ Thêm tủ</button>' : '') + '</div><div class="lockers">' + r.tu.map(t =>
+      '<div class="locker ' + (t.trang_thai === 'Đang dùng' ? 'dung' : t.trang_thai === 'Hỏng' ? 'hong' : '') + (t.trang_thai === 'Đang dùng' && t.han && t.han < hn ? ' qh' : '') + '" data-so="' + esc(t.so) + '" title="' + esc(t.trang_thai + (t.nguoi ? ' – ' + t.nguoi : '') + (t.han ? ' – hạn ' + ngayVN(t.han) : '')) + '">' +
+      '<b>' + esc(t.so) + '</b><small>' + esc(t.trang_thai === 'Đang dùng' ? t.nguoi : t.trang_thai) + '</small></div>').join('') + '</div>' +
+      '<div class="legend"><span><i></i>Trống</span><span><i style="background:var(--info-bg)"></i>Đang dùng</span><span><i style="background:var(--bad-bg)"></i>Hỏng</span><span><i style="outline:2px solid var(--warn)"></i>Quá hạn trả</span><span>Bấm vào tủ để giao / trả / báo hỏng</span></div></div>';
+    h += '<div class="card"><h2>Thiết bị trong phòng (' + r.thiet_bi.filter(x => x.tinh_trang !== 'Đã thanh lý').length + ')</h2>' + bangTB(r.thiet_bi.filter(x => x.tinh_trang !== 'Đã thanh lý'), true) + '</div>';
+    h += '<div id="lich-phong"></div>';
+    nd.innerHTML = h;
+    ganBangTB(nd);
+    nd.querySelectorAll('.locker').forEach(el => { el.onclick = () => hopTu(r.tu.find(t => t.so === el.dataset.so)); });
+    if ($('b-them-tu')) $('b-them-tu').onclick = async (e) => {
+      const n = prompt('Thêm bao nhiêu tủ cho phòng ' + ma + '? (đang có ' + r.tu.length + ' tủ; tủ mới đánh số tiếp theo)', '1'); if (!n) return;
+      const x = await chay(e.target, () => api('tu_them', { phong: ma, so_luong: n })); toast('Đã thêm tủ ' + x.them.join(', ') + ' – phòng có ' + x.tong + ' tủ'); dieuHuong(); };
+    if (window.PTN_QL.lichPhong) window.PTN_QL.lichPhong(ma, $('lich-phong'));
+    if ($('b-sua-phong')) $('b-sua-phong').onclick = () => hopPhong(p);
+    $('b-them-tb').onclick = () => hopThietBi(null, ma);
+  }
+  function hopTu(t) {
+    moHop('<h2>Tủ ' + esc(t.so) + ' – phòng ' + esc(t.phong) + '</h2><form id="f">' +
+      o('trang_thai', 'Trạng thái', { select: S.dm.trang_thai_tu, v: t.trang_thai }) +
+      '<div id="tu-dung"><div class="form-grid">' + o('nguoi', 'Người sử dụng (họ tên – MSSV/nhóm)', { v: t.nguoi, req: 1, full: 1 }) + o('sdt', 'Điện thoại', { v: t.sdt }) +
+      o('tu_ngay', 'Từ ngày', { type: 'date', v: t.tu_ngay || homNay() }) + o('han', 'Hạn trả', { type: 'date', v: t.han }) + '</div></div>' +
+      o('ghi_chu', 'Ghi chú', { v: t.ghi_chu }) +
+      '<p class="note">Đơn QR6 khi cán bộ bấm "Giao chìa tủ" / "Trả tủ" sẽ tự cập nhật sơ đồ này.</p>' +
+      '<div class="modal-foot">' + (t.trang_thai !== 'Đang dùng' && coQuyen('phong', 'xu_ly') ? '<button type="button" class="btn red o" id="b-xoa-tu" style="margin-right:auto">🗑 Xóa tủ</button>' : '') + '<button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu</button></div></form>', (root) => {
+      const sel = root.querySelector('[name=trang_thai]'), box = $('tu-dung');
+      const doi = () => box.classList.toggle('hide', sel.value !== 'Đang dùng');
+      sel.onchange = doi; doi();
+    });
+    $('f').onsubmit = async (e) => {
+      e.preventDefault();
+      const v = giaTri(e.target); v.phong = t.phong; v.so = t.so;
+      await chay(e.submitter, () => api('tu_luu', { tu: v }));
+      dongHop(); toast('Đã cập nhật tủ ' + t.so); dieuHuong();
+    };
+    if ($('b-xoa-tu')) $('b-xoa-tu').onclick = async (e) => {
+      if (!confirm('Xóa tủ ' + t.so + ' của phòng ' + t.phong + '? (xóa nhầm: bấm "+ Thêm tủ" để thêm lại)')) return;
+      await chay(e.target, () => api('tu_xoa', { phong: t.phong, so: t.so })); dongHop(); toast('Đã xóa tủ ' + t.so); dieuHuong(); };
+  }
+
+  // ---------------- Tài sản ----------------
+  function bangTB(ds, gon) {
+    if (!ds.length) return '<div class="empty">Chưa có thiết bị.</div>';
+    return '<div class="tbl-wrap"><table><thead><tr><th>Mã tài sản</th><th>Tên thiết bị</th>' + (gon ? '' : '<th>Phòng</th>') + '<th>Tình trạng</th><th>Kiểm định kế tiếp</th><th>Bảo dưỡng kế tiếp</th></tr></thead><tbody>' +
+      ds.map(x => '<tr class="click" data-id="' + esc(x.id) + '"><td class="mono">' + (x.ma_ts ? esc(x.ma_ts) : '<span class="tag t-warn">chưa có</span>') + '</td><td><b>' + esc(x.ten) + '</b>' +
+        (x.hang || x.model ? '<div class="note">' + esc([x.hang, x.model].filter(Boolean).join(' · ')) + '</div>' : '') + (x.nguoi_muon ? '<div class="note">Đang mượn: ' + esc(x.nguoi_muon) + '</div>' : '') + '</td>' +
+        (gon ? '' : '<td>' + esc(x.phong || '—') + '</td>') + '<td>' + tag(x.tinh_trang) + '</td><td>' + hanTag(x.kd_ke) + '</td><td>' + hanTag(x.bd_ke) + '</td></tr>').join('') + '</tbody></table></div>';
+  }
+  function ganBangTB(root) { root.querySelectorAll('tr[data-id]').forEach(tr => { tr.onclick = () => { location.hash = '#/tai-san/' + tr.dataset.id; }; }); }
+
+  async function manTaiSan() {
+    const q = new URLSearchParams((location.hash.split('?')[1]) || '');
+    const nd = trang('Tài sản Viện', '<button class="btn o sm" id="b-xuat">Xem trước – in / Excel</button><button class="btn o sm" id="b-nhap">Nhập từ Excel</button><button class="btn sm" id="b-them">+ Thêm thiết bị</button>');
+    const ds = await api('tb_ds'); S.cache.tb = ds;
+    const ttMacDinh = q.get('tt') || '';
+    nd.innerHTML = '<div class="tools"><input type="search" id="q" placeholder="Tìm tên, mã tài sản, hãng, model, serial…">' +
+      '<select id="f-phong"><option value="">Tất cả phòng</option>' + dsPhongChon().map(p => '<option value="' + esc(p[0]) + '">' + esc(p[0]) + '</option>').join('') + '<option value="-">Chưa xếp phòng</option></select>' +
+      '<select id="f-tt"><option value="">Tình trạng (trừ đã thanh lý)</option><option value="*">Tất cả kể cả đã thanh lý</option><option value="hong">Hỏng / đang sửa</option>' + S.dm.tinh_trang_tb.map(t => '<option' + (t === ttMacDinh ? ' selected' : '') + '>' + esc(t) + '</option>').join('') + '</select>' +
+      '<label class="check" style="margin:0"><input type="checkbox" id="f-thieu"' + (q.get('thieu') ? ' checked' : '') + '> Chưa có mã TS</label></div><div id="kq"></div>';
+    if (ttMacDinh === 'hong') $('f-tt').value = 'hong';
+    const loc = () => {
+      const tu = boDau($('q').value), ph = $('f-phong').value, tt = $('f-tt').value, thieu = $('f-thieu').checked;
+      const l = ds.filter(x => (!tu || boDau([x.ten, x.ma_ts, x.hang, x.model, x.serial, x.id, x.loai].join(' ')).indexOf(tu) >= 0) &&
+        (!ph || (ph === '-' ? !x.phong : x.phong === ph)) &&
+        (tt === '*' || (tt === 'hong' ? (x.tinh_trang === 'Hỏng – chờ sửa' || x.tinh_trang === 'Đang sửa') : tt ? x.tinh_trang === tt : x.tinh_trang !== 'Đã thanh lý')) &&
+        (!thieu || !x.ma_ts));
+      $('kq').innerHTML = '<p class="note">' + l.length + ' / ' + ds.length + ' thiết bị</p>' + bangTB(l);
+      ganDieuHuong(l.map(x => '#/tai-san/' + x.id), 'thiết bị');
+      ganBangTB($('kq'));
+    };
+    ['q', 'f-phong', 'f-tt', 'f-thieu'].forEach(id => { $(id).oninput = loc; $(id).onchange = loc; });
+    loc();
+    $('b-them').onclick = () => hopThietBi(null);
+    $('b-nhap').onclick = hopNhapExcel;
+    $('b-xuat').onclick = () => xuatExcel(ds);
+  }
+
+  const TRUONG_TB = [
+    ['ma_ts', 'Mã tài sản', { ph: 'Theo nhãn dán trên máy' }], ['ten', 'Tên thiết bị', { req: 1 }], ['loai', 'Loại thiết bị'], ['hang', 'Hãng sản xuất'],
+    ['model', 'Model'], ['serial', 'Số serial'], ['xuat_xu', 'Xuất xứ'], ['nguon_von', 'Nguồn vốn'], ['nam_sx', 'Năm sản xuất'],
+    ['ngay_nhan', 'Ngày nhận / đưa vào sử dụng', { type: 'date' }], ['nguyen_gia', 'Nguyên giá (VNĐ)', { ph: 'Chỉ nhập số' }],
+    ['kd_gan', 'Kiểm định gần nhất', { type: 'date' }], ['kd_chu_ky', 'Chu kỳ kiểm định (tháng)', { type: 'number' }], ['kd_ke', 'Kiểm định kế tiếp', { type: 'date', help: 'Để trống: tự tính từ ngày gần nhất + chu kỳ' }],
+    ['bd_gan', 'Bảo dưỡng gần nhất', { type: 'date' }], ['bd_chu_ky', 'Chu kỳ bảo dưỡng (tháng)', { type: 'number' }], ['bd_ke', 'Bảo dưỡng kế tiếp', { type: 'date' }],
+    ['thong_so', 'Thông số kỹ thuật', { area: 1, full: 1 }], ['ghi_chu', 'Ghi chú', { full: 1 }]
+  ];
+  function hopThietBi(tb, phongMacDinh) {
+    const moi = !tb; tb = tb || { phong: phongMacDinh || '' };
+    let h = '<h2>' + (moi ? 'Thêm thiết bị' : 'Sửa thông tin – ' + esc(tb.ten)) + '</h2><form id="f"><div class="form-grid">';
+    TRUONG_TB.forEach(f => {
+      h += o(f[0], f[1], Object.assign({ v: tb[f[0]] }, f[2] || {}));
+      if (f[0] === 'ten') h += moi ? o('phong', 'Phòng', { select: dsPhongChon('— Chưa xếp phòng —'), v: tb.phong }) : '<label class="f"><span>Phòng</span><input type="text" value="' + esc(tb.phong || '—') + '" readonly><span class="note">Đổi phòng: dùng "Điều chuyển"</span></label>';
+    });
+    h += '</div><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu</button></div></form>';
+    moHop(h);
+    $('f').onsubmit = async (e) => {
+      e.preventDefault();
+      const v = giaTri(e.target); if (!moi) { v.id = tb.id; delete v.phong; }
+      const r = await chay(e.submitter, () => api('tb_luu', { tb: v }));
+      dongHop(); toast(moi ? 'Đã thêm ' + r.id : 'Đã lưu');
+      if (moi) location.hash = '#/tai-san/' + r.id; else dieuHuong();
+    };
+  }
+
+  async function manThietBi(id) {
+    const nd = trang('Hồ sơ thiết bị', '', '<a href="#/tai-san">Tài sản</a> ›');
+    const r = await api('tb_ct', { id }), x = r.tb, tl = x.tinh_trang === 'Đã thanh lý';
+    $('main').querySelector('h1').innerHTML = esc(x.ten) + ' ' + tag(x.tinh_trang);
+    const loai = S.dm.loai_su_kien.filter(l => !tl || l.ma === 'ghi_chu');
+    let h = '<div class="btns" style="margin-bottom:14px"><select id="sk-loai"><option value="">+ Ghi sự kiện…</option>' + loai.map(l => '<option value="' + l.ma + '">' + esc(l.ten) + '</option>').join('') + '</select>' +
+      '<button class="btn o sm" id="b-sua">Sửa thông tin</button><button class="btn o sm" id="b-tep">Đính kèm tệp</button><a class="btn o sm" href="#/bao-cao/tb/' + esc(x.id) + '">Dashboard sử dụng</a>' +
+      '<button class="btn o sm" id="b-tem">In tem</button><button class="btn o sm" onclick="window.print()">In hồ sơ</button>' +
+      (laAdmin() ? '<button class="btn red sm" id="b-xoa">Xóa (nhập nhầm)</button>' : '') + '</div>';
+    const ttin = [['ID', x.id], ['Mã tài sản', x.ma_ts || '— chưa có —'], ['Phòng', x.phong ? x.phong + ' – ' + phongTen(x.phong) : '— chưa xếp phòng —'], ['Loại', x.loai],
+      ['Hãng / model', [x.hang, x.model].filter(Boolean).join(' · ')], ['Số serial', x.serial], ['Xuất xứ', x.xuat_xu], ['Nguồn vốn', x.nguon_von], ['Năm SX', x.nam_sx],
+      ['Ngày nhận', ngayVN(x.ngay_nhan)], ['Nguyên giá', tien(x.nguyen_gia)], ['Người đang mượn', x.nguoi_muon ? x.nguoi_muon + (x.han_tra ? ' – hạn ' + ngayVN(x.han_tra) : '') : ''],
+      ['Thông số', x.thong_so], ['Ghi chú', x.ghi_chu], ['Cập nhật', x.cap_nhat ? ngayVN(x.cap_nhat) + ' – ' + x.nguoi_cap_nhat : '']].filter(k => k[1]);
+    h += '<div class="grid g2"><div><div class="card"><h2>Thông tin</h2><dl class="kv">' + ttin.map(k => '<dt>' + k[0] + '</dt><dd>' + esc(k[1]) + '</dd>').join('') + '</dl></div>' +
+      '<div class="card"><h2>Kiểm định – bảo dưỡng</h2><dl class="kv"><dt>Kiểm định gần nhất</dt><dd>' + (ngayVN(x.kd_gan) || '—') + (x.kd_chu_ky ? ' · chu kỳ ' + esc(x.kd_chu_ky) + ' tháng' : '') + '</dd><dt>Kiểm định kế tiếp</dt><dd>' + hanTag(x.kd_ke) + '</dd>' +
+      '<dt>Bảo dưỡng gần nhất</dt><dd>' + (ngayVN(x.bd_gan) || '—') + (x.bd_chu_ky ? ' · chu kỳ ' + esc(x.bd_chu_ky) + ' tháng' : '') + '</dd><dt>Bảo dưỡng kế tiếp</dt><dd>' + hanTag(x.bd_ke) + '</dd></dl></div>' +
+      '<div class="card"><h2>Tệp đính kèm (' + r.tep.length + ')</h2>' + (r.tep.length ? '<ul class="files">' + r.tep.map(f => '<li><span>📄 ' + esc(f.ten) + '<br><span class="note">' + esc((f.mo_ta ? f.mo_ta + ' · ' : '') + ngayVN(f.tao) + ' · ' + f.nguoi + ' · ' + Math.ceil(f.kich_thuoc / 1024) + ' KB') + '</span></span><span class="btns"><button class="btn o sm" data-tai="' + esc(f.id) + '">Tải về</button>' + (laAdmin() ? '<button class="btn red sm" data-xoa-tep="' + esc(f.id) + '">Xóa</button>' : '') + '</span></li>').join('') + '</ul>' : '<div class="note">Chưa có. Có thể đính kèm phiếu xuất kho, biên bản bàn giao, giấy kiểm định, hóa đơn sửa chữa…</div>') + '</div></div>' +
+      '<div class="card"><h2>Dòng thời gian</h2><ul class="timeline">' + r.su_kien.map(s => '<li><div class="when">' + ngayVN(s.ngay) + ' · ' + esc(s.nguoi) + '</div><div class="what">' + esc(s.ten_loai) +
+        (s.tu || s.den ? ' <span class="note">' + esc([s.tu, s.den].filter(Boolean).join(' → ')) + '</span>' : '') + '</div>' + (s.noi_dung ? '<div>' + esc(s.noi_dung) + '</div>' : '') + (s.chi_phi ? '<div class="note">Chi phí: ' + tien(s.chi_phi) + '</div>' : '') + '</li>').join('') + '</ul></div></div>';
+    nd.innerHTML = h;
+    $('sk-loai').onchange = (e) => { if (e.target.value) hopSuKien(x, e.target.value); e.target.value = ''; };
+    $('b-sua').onclick = () => hopThietBi(x);
+    $('b-tep').onclick = () => hopTep(x);
+    $('b-tem').onclick = () => window.PTN_QL.inTem([x], 'tb');
+    if ($('b-xoa')) $('b-xoa').onclick = async (e) => {
+      const ly = prompt('Chỉ xóa khi nhập nhầm / trùng. Máy hỏng, bỏ đi → dùng sự kiện "Thanh lý".\nNhập lý do xóa:');
+      if (!ly) return;
+      await chay(e.target, () => api('tb_xoa', { id: x.id, ly_do: ly })); toast('Đã xóa'); location.hash = '#/tai-san';
+    };
+    nd.querySelectorAll('[data-tai]').forEach(b => { b.onclick = (e) => chay(e.target, () => taiVe(b.dataset.tai)); });
+    nd.querySelectorAll('[data-xoa-tep]').forEach(b => { b.onclick = async (e) => { if (!confirm('Xóa tệp này?')) return; await chay(e.target, () => api('tep_xoa', { id: b.dataset.xoaTep })); toast('Đã xóa tệp'); dieuHuong(); }; });
+  }
+
+  function hopSuKien(x, loai) {
+    const L = S.dm.loai_su_kien.find(l => l.ma === loai);
+    let f = o('ngay', 'Ngày', { type: 'date', v: homNay(), req: 1 });
+    if (loai === 'dieu_chuyen') f += o('den', 'Chuyển đến phòng', { select: dsPhongChon('— Chọn phòng —').filter(p => p[0] !== x.phong), req: 1 });
+    if (loai === 'cho_muon') f += '<div class="form-grid">' + o('nguoi_muon', 'Người mượn (họ tên – đơn vị)', { req: 1 }) + o('han_tra', 'Hạn trả', { type: 'date' }) + '</div>';
+    if (loai === 'nhan_tra') f += o('tinh_trang', 'Tình trạng máy khi nhận lại', { select: ['Đang sử dụng', 'Hỏng – chờ sửa'] });
+    if (loai === 'kiem_dinh') f += '<div class="form-grid">' + o('ket_qua', 'Kết quả', { select: ['Đạt', 'Không đạt'] }) + o('chu_ky', 'Chu kỳ (tháng)', { type: 'number', v: x.kd_chu_ky }) +
+      o('ke_tiep', 'Ngày kiểm định kế tiếp', { type: 'date', help: 'Để trống: tự tính theo chu kỳ' }) + o('tinh_trang', 'Tình trạng sau kiểm định', { select: [['', 'Giữ nguyên']].concat(S.dm.tinh_trang_tb.filter(t => t !== 'Đã thanh lý' && t !== 'Đang cho mượn').map(t => [t, t])) }) + '</div>';
+    if (loai === 'bao_duong') f += '<div class="form-grid">' + o('chu_ky', 'Chu kỳ (tháng)', { type: 'number', v: x.bd_chu_ky }) + o('ke_tiep', 'Ngày bảo dưỡng kế tiếp', { type: 'date', help: 'Để trống: tự tính theo chu kỳ' }) + '</div>';
+    if (['sua_chua', 'sua_xong', 'bao_duong', 'kiem_dinh', 'nhan_moi'].indexOf(loai) >= 0) f += o('chi_phi', 'Chi phí (VNĐ)', { ph: 'Nếu có' });
+    const goiY = { bao_hong: 'Mô tả hư hỏng, người báo…', thanh_ly: 'Số quyết định / biên bản thanh lý…', nhan_moi: 'Số phiếu xuất kho, hợp đồng, đơn vị tài trợ…', sua_chua: 'Đơn vị sửa chữa, phiếu đề nghị…' }[loai] || '';
+    f += o('noi_dung', 'Nội dung', { area: 1, ph: goiY, req: loai === 'ghi_chu' || loai === 'thanh_ly' }) +
+      '<label class="f"><span>Đính kèm tệp (không bắt buộc)</span><input type="file" name="tep"></label>';
+    const canhBao = loai === 'thanh_ly' ? '<p class="err">Sau khi thanh lý, máy chỉ còn thêm được ghi chú.</p>' : '';
+    moHop('<h2>' + esc(L.ten) + ' – ' + esc(x.ten) + '</h2>' + canhBao + '<form id="f">' + f + '<div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu</button></div></form>');
+    $('f').onsubmit = async (e) => {
+      e.preventDefault();
+      const fileEl = e.target.querySelector('[name=tep]'), file = fileEl.files[0];
+      const v = giaTri(e.target); delete v.tep; v.loai = loai;
+      if ((loai === 'ghi_chu' || loai === 'thanh_ly') && !v.noi_dung) return toast('Nhập nội dung', true);
+      await chay(e.submitter, async () => {
+        await api('tb_su_kien', { id: x.id, sk: v });
+        if (file) await guiTep(x.id, file, L.ten);
+      });
+      dongHop(); toast('Đã ghi: ' + L.ten); dieuHuong();
+    };
+  }
+
+  function docB64(file) {
+    return new Promise((ok, loi) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => loi(new Error('Không đọc được tệp')); r.readAsDataURL(file); });
+  }
+  async function guiTep(tbId, file, moTa) {
+    if (file.size > 15 * 1024 * 1024) throw new Error('Tệp lớn hơn 15 MB');
+    const b64 = await docB64(file);
+    return api('tep_len', { lien_ket: tbId, ten: file.name, mime: file.type || 'application/octet-stream', b64, mo_ta: moTa || '' });
+  }
+  function hopTep(x) {
+    moHop('<h2>Đính kèm tệp – ' + esc(x.ten) + '</h2><form id="f"><label class="f"><span>Chọn tệp (PDF, ảnh, Word, Excel – tối đa 15 MB) <em>*</em></span><input type="file" name="tep" required></label>' +
+      o('mo_ta', 'Mô tả', { ph: 'VD: Phiếu xuất kho số …, Giấy chứng nhận kiểm định 2026' }) +
+      '<p class="note">Tệp lưu trong Google Drive của Viện, chỉ cán bộ đăng nhập mới tải được.</p><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Tải lên</button></div></form>');
+    $('f').onsubmit = async (e) => {
+      e.preventDefault();
+      const file = e.target.querySelector('[name=tep]').files[0]; if (!file) return;
+      await chay(e.submitter, () => guiTep(x.id, file, e.target.querySelector('[name=mo_ta]').value.trim()));
+      dongHop(); toast('Đã tải lên'); dieuHuong();
+    };
+  }
+  async function taiVe(id) {
+    const f = await api('tep_tai', { id });
+    const bin = atob(f.b64), u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([u8], { type: f.mime }));
+    const a = document.createElement('a'); a.href = url; a.download = f.ten; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  // ---------------- Excel ----------------
+  function napXlsx() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    return new Promise((ok, loi) => { const s = document.createElement('script'); s.src = XLSX_URL; s.onload = () => ok(window.XLSX); s.onerror = () => loi(new Error('Không tải được thư viện Excel (cần mạng)')); document.head.appendChild(s); });
+  }
+  // Ghép tiêu đề cột trong file với trường dữ liệu (theo từ khóa, không dấu)
+  const GHEP_COT = [
+    ['ma_ts', ['ma tai san', 'ma ts', 'ma thiet bi']], ['ten', ['ten thiet bi', 'ten may', 'ten tai san', 'ten']], ['phong', ['ma phong', 'phong', 'vi tri dat', 'vi tri']],
+    ['loai', ['loai']], ['hang', ['hang']], ['model', ['model', 'ky hieu']], ['serial', ['serial', 'so may']], ['xuat_xu', ['xuat xu', 'quoc gia']],
+    ['nguon_von', ['nguon von']], ['nam_sx', ['nam san xuat', 'nam sx']], ['ngay_nhan', ['ngay dua vao su dung', 'ngay nhan', 'ngay mua']],
+    ['nguyen_gia', ['nguyen gia']], ['kd_gan', ['kiem dinh gan nhat']], ['kd_ke', ['kiem dinh ke tiep']], ['kd_chu_ky', ['chu ky kiem dinh', 'chu ky kd']],
+    ['thong_so', ['thong so']], ['ghi_chu', ['ghi chu']]
+  ];
+  function ghepCot(tieuDe) {
+    const map = {}, daDung = {};
+    GHEP_COT.forEach(([k, tu]) => {
+      for (const t of tu) {
+        const i = tieuDe.findIndex((h, j) => !daDung[j] && boDau(h).indexOf(t) >= 0);
+        if (i >= 0) { map[k] = i; daDung[i] = 1; return; }
+      }
+    });
+    return map;
+  }
+  function chuanNgay(v) {
+    if (v == null || v === '') return '';
+    if (v instanceof Date && !isNaN(v)) return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+    const s = String(v).trim();
+    let m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s); if (m) return m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+    m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s); if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+    if (/^\d{4}$/.test(s)) return s + '-01-01';
+    return s; // máy chủ sẽ báo dòng sai ngày
+  }
+  function chuanPhong(v) { const m = /([A-Z])\s?(\d{1,2})\.(\d{2})([A-Z](?![a-zà-ỹ]))?/i.exec(String(v || '')); return m ? (m[1].toUpperCase() + (+m[2]) + '.' + m[3] + (m[4] || '').toUpperCase()) : ''; } // mã phòng Viện: F4.03, F7.08A, D10.01
+  // ---- Bộ đọc các file Excel của PTN (mảng hàng như SheetJS sheet_to_json header:1) ----
+  const so1 = (v) => { const n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isNaN(n) ? 0 : n; };
+  const chu = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  const tim = (row, re) => row.findIndex(c => re.test(boDau(chu(c)))); // tiêu đề có thể xuống dòng
+  // File "Kế hoạch vật tư" (KSK. KH vat HKx …): khối theo môn "1. TH …", danh sách lớp (mã lớp, mã HP, sĩ số), vật tư + SLG/1HS (+ SLG nếu có)
+  // tuy.monKhongSo: tên môn có thể ghi không đánh số (file dự trù của môn: "Công nghiệp dược" cùng dòng lớp, STT 1)
+  function docKeHoachVatTu(rows, tuy) {
+    tuy = tuy || {};
+    const h = rows.findIndex(r => r.some(c => /qu[iy] cach/.test(boDau(chu(c)))) && r.some(c => /slg/.test(boDau(chu(c)))));
+    if (h < 0) throw new Error('Không thấy dòng tiêu đề (cần cột "QUI CÁCH VẬT TƯ", "SLG/1HS")');
+    const H = rows[h], C = {
+      a: 0, lop: tim(H, /ma so lop|^lop$/), lhp: tim(H, /ma hoc phan|ma lhp/), ss: tim(H, /si so|sy so/), stt: tim(H, /^stt$/),
+      ten: tim(H, /qu[iy] cach/), ma: tim(H, /^ma\s*vt$|ma vat tu/), nsx: tim(H, /^nsx$/), dvt: tim(H, /^dv|don vi/), dm: tim(H, /slg\s*\/\s*1|\/\s*1\s*(hs|sv)/), gc: tim(H, /ghi chu/),
+      sl: tim(H, /^slg$|^so luong$|^tong slg?$/)
+    };
+    // nhóm: dòng nhãn ở cột đầu ("DƯỢC LIỆU…") theo khối STT; hoặc 3 vùng ngăn bằng dòng trắng trong môn: 1 Hóa chất · 2 Dược liệu · 3 Vật tư tiêu hao
+    // (bỏ trống một nhóm: để 2 dòng trắng liền nhau); không nhãn, không dòng trắng → máy chủ tự xếp theo tên / mã VT
+    const VUNG = ['Hóa chất', 'Dược liệu', 'Vật tư tiêu hao'], trang = (r) => !r || r.every(c => chu(c) === '');
+    const mon = []; let m = null, sec = 0, sttTruoc = 0, vung = 0, coHang = false; const nhan = {};
+    for (let i = h + 1; i < rows.length; i++) {
+      const r = rows[i] || [], a = chu(r[0]);
+      if (trang(r)) { if (m && coHang) vung++; continue; }
+      if (/hieu truong|nguoi lap|truong khoa|vien truong/.test(boDau(a))) break;
+      const dauMon = /^\d+\s*[.)]\s*\S/.test(a) || (tuy.monKhongSo && a && so1(r[C.stt]) === 1 && C.lop >= 0 && (chu(r[C.lop]) || chu(r[C.lhp])));
+      if (dauMon) { m = { ten: a.replace(/^\d+\s*[.)]\s*/, ''), ma_hp: [], lop: [], dm: [] }; mon.push(m); sec++; sttTruoc = 0; vung = 0; coHang = false; }
+      if (!m) continue;
+      const stt = so1(r[C.stt]);
+      if (stt && stt <= sttTruoc) sec++;
+      if (stt) sttTruoc = stt;
+      if (a && !dauMon) nhan[sec] = a.charAt(0) + a.slice(1).toLowerCase();
+      if (C.lop >= 0 && (chu(r[C.lop]) || chu(r[C.lhp])) && (/\d/.test(chu(r[C.lhp])) || so1(r[C.ss]) > 0)) { // bỏ dòng tiêu đề lặp lại, dòng nhãn "PHẦN HÓA CHẤT"
+        const lhp = chu(r[C.lhp]);
+        m.lop.push({ lop: chu(r[C.lop]), ma_lhp: lhp, si_so: so1(r[C.ss]) });
+        if (/^\d{10}/.test(lhp) && m.ma_hp.indexOf(lhp.slice(0, 10)) < 0) m.ma_hp.push(lhp.slice(0, 10));
+      }
+      const ten = chu(r[C.ten]);
+      if (ten && stt) { coHang = true; m.dm.push({ _sec: sec, _vung: vung, stt, ten, ma_vt: chu(r[C.ma]), nsx: chu(r[C.nsx]), dvt: chu(r[C.dvt]), dm: so1(r[C.dm]), sl: C.sl >= 0 ? so1(r[C.sl]) : 0, ghi_chu: C.gc >= 0 ? chu(r[C.gc]) : '' }); }
+    }
+    // nhãn "Dược liệu…" / "Vật tư…" giữ cố định; nhãn chung "Hóa chất" vẫn để máy chủ tách vật tư tiêu hao theo tên / mã VT
+    const nhomTuNhan = (t) => /duoc lieu/.test(boDau(t)) ? 'Dược liệu' : /vat tu|tieu hao/.test(boDau(t)) ? 'Vật tư tiêu hao' : '';
+    mon.forEach(x => { const coVung = x.dm.some(d => d._vung > 0); x.dm.forEach(d => { // chỉ chia vùng khi có dòng nằm sau dòng trắng (dòng trắng cuối môn không tính)
+      const nh = nhomTuNhan(nhan[d._sec] || ''), v = coVung ? VUNG[Math.min(d._vung, 2)] : '';
+      d.nhom = nh || v || nhan[d._sec] || 'Hóa chất'; if (nh || v) d.nhom_ro = 1; // nhóm ghi rõ trong file → giữ, không tự xếp
+      delete d._sec; delete d._vung; }); });
+    return mon.filter(x => x.dm.length);
+  }
+  // Phiếu dự trù hóa chất – vật tư của một môn (mẫu PHIẾU DỰ TRÙ: tên môn, mã môn / mã HP, tổng số sinh viên; nhóm 1. Hóa chất · 2. Dược liệu · 3. Vật tư tiêu hao;
+  // cột TÊN NGUYÊN LIỆU – QUY CÁCH, CÔNG THỨC, MÃ VT, NSX, ĐVT, ĐM 1 SV, TỔNG SV, SL DỰ TRÙ, GHI CHÚ). Không phải phiếu → null
+  function docPhieuDuTru(rows) {
+    if (!rows.some(r => r.some(c => /phieu du tru/.test(boDau(chu(c)))))) return null;
+    const sauNhan = (re) => { for (const r of rows) { const j = r.findIndex(c => re.test(boDau(chu(c)))); if (j >= 0) { for (let k = j + 1; k < r.length; k++) if (chu(r[k])) return r[k]; return ''; } } return ''; };
+    const ten = chu(sauNhan(/^ten mon thuc hanh/)), maMon = chu(sauNhan(/^ma mon/)), ss = so1(sauNhan(/^tong so sinh vien/));
+    const h = rows.findIndex(r => r.some(c => /ten nguyen lieu|qu[iy] cach/.test(boDau(chu(c)))) && r.some(c => /^dm/.test(boDau(chu(c)))));
+    if (h < 0) throw new Error('Phiếu dự trù thiếu dòng tiêu đề danh mục (TÊN NGUYÊN LIỆU – QUY CÁCH, ĐM 1 SV…)');
+    const H = rows[h], C = { stt: tim(H, /^stt$/), ten: tim(H, /ten nguyen lieu|qu[iy] cach/), ct: tim(H, /cong thuc/), ma: tim(H, /^ma\s*vt$/), nsx: tim(H, /^nsx$/), dvt: tim(H, /^dvt|^dv/),
+      dm: tim(H, /^dm/), sl: tim(H, /^sl/), gc: tim(H, /ghi chu/) };
+    const TEN_NHOM = ['Hóa chất', 'Dược liệu', 'Vật tư tiêu hao'], dm = []; let nhom = 'Hóa chất';
+    for (let i = h + 1; i < rows.length; i++) {
+      const r = rows[i] || [], t = chu(r[C.ten]), a = boDau(chu(r[0]) + ' ' + t);
+      if (/tong so khoan|^ghi chu/.test(boDau(chu(r[0])))) break;
+      const g = /^\s*([123])\s*[.)]\s*(hoa chat|duoc lieu|vat tu)/.exec(boDau(t)); if (g) { nhom = TEN_NHOM[+g[1] - 1]; continue; }
+      if (!t || /^(stt|ten nguyen lieu)/.test(a.trim())) continue;
+      dm.push({ stt: so1(r[C.stt]) || dm.length + 1, nhom, nhom_dt: String(TEN_NHOM.indexOf(nhom) + 1), ten: t, cong_thuc: C.ct >= 0 ? chu(r[C.ct]) : '', ma_vt: chu(r[C.ma]), nsx: chu(r[C.nsx]), dvt: chu(r[C.dvt]), dm: so1(r[C.dm]), sl: C.sl >= 0 ? so1(r[C.sl]) : 0, ghi_chu: C.gc >= 0 ? chu(r[C.gc]) : '' });
+    }
+    const hp = (maMon.match(/\d{10}/g) || []), m = /\bM\d+\b/.exec(maMon);
+    return { ten, mon: m ? m[0] : '', ma_hp: hp, lop: [{ lop: '', ma_lhp: '', si_so: ss }], dm };
+  }
+  // Dự trù theo nhóm: mỗi nhóm một khối có dòng tiêu đề nhóm (HÓA CHẤT / VẬT TƯ TIÊU HAO / DƯỢC LIỆU…) ngay trên dòng tiêu đề cột
+  // (STT | TÊN NGUYÊN LIỆU | ĐVT | ĐM… | SL… | THỰC NHẬN | GHI CHÚ); thứ tự các nhóm tùy ý. Không phải mẫu này → null.
+  function docDuTruNhom(rows, tenSheet) {
+    const dong = (r) => (r || []).map(chu).filter(Boolean).join(' '), trang = (r) => !dong(r);
+    const nhomCua = (t) => { const b = boDau(t); return /duoc lieu/.test(b) ? 'Dược liệu' : /vat tu|tieu hao/.test(b) ? 'Vật tư tiêu hao' : /hoa chat/.test(b) ? 'Hóa chất' : ''; };
+    const laTieuDe = (r) => r && r.some(c => /ten nguyen lieu|ten hoa chat|ten vat tu|qu[iy] cach/.test(boDau(chu(c)))) && r.some(c => /^dvt|^dv\b|don vi/.test(boDau(chu(c))));
+    const khoi = []; // [{h: chỉ số dòng tiêu đề cột, nhom}]
+    rows.forEach((r, i) => { if (!laTieuDe(r)) return; let k = i - 1; while (k >= 0 && trang(rows[k])) k--; const n = k >= 0 && !laTieuDe(rows[k]) ? nhomCua(dong(rows[k])) : ''; khoi.push({ h: i, nhom: n, k }); });
+    if (!khoi.length || !khoi.some(x => x.nhom)) return null;
+    const dau = rows.slice(0, khoi[0].k >= 0 ? khoi[0].k : khoi[0].h).map(dong), tim1 = (re) => { for (const t of dau) { const m = re.exec(boDau(t)); if (m) return t.slice(m.index + m[0].length).replace(/^[\s:.-]+/, '').trim(); } return ''; };
+    const tenMon = (tim1(/(^|\s)mon( hoc| thuc hanh)?\s*:/) || tim1(/ten mon( thuc hanh)?\s*:?/) || String(tenSheet || '')).split(/\s+(Thời gian|Phòng|Lớp|GVHD|Giảng viên|Tổng số|Học kỳ)\s*:/i)[0].trim();
+    const ss = so1((/(\d+)/.exec(tim1(/(tong so (sv|sinh vien)[^:]*|si so)\s*:?/)) || [])[1]);
+    const hp = (dau.join(' ').match(/\b\d{10}\b/g) || []).filter((x, i, a) => a.indexOf(x) === i);
+    const dm = [];
+    khoi.forEach((kh, j) => {
+      const H = rows[kh.h], ket = j + 1 < khoi.length ? (khoi[j + 1].k >= 0 ? khoi[j + 1].k : khoi[j + 1].h) : rows.length, nhom = kh.nhom || 'Hóa chất';
+      const C = { stt: tim(H, /^stt$/), ten: tim(H, /ten nguyen lieu|ten hoa chat|ten vat tu|qu[iy] cach/), ct: tim(H, /cong thuc/), ma: tim(H, /^ma\s*vt$|ma vat tu/), nsx: tim(H, /^nsx$/), dvt: tim(H, /^dvt|^dv\b|don vi/),
+        dm: tim(H, /^dm|dinh muc/), sl: H.findIndex(c => /^sl\b|^slg|so luong/.test(boDau(chu(c))) && !/thuc nhan|ban giao|hoan tra/.test(boDau(chu(c)))), gc: tim(H, /ghi chu/) };
+      const dmTheoSV = C.dm >= 0 && /1\s*(sv|hs|sinh vien)/.test(boDau(chu(H[C.dm]))); // "ĐM 1 NHÓM" không phải định mức / 1 SV → chỉ lấy SL
+      for (let i = kh.h + 1; i < ket; i++) {
+        const r = rows[i] || [], t = chu(r[C.ten]);
+        if (!t || laTieuDe(r) || /^(tong|cong)\b/.test(boDau(t)) || /nguoi lap|truong khoa|vien truong|ban giao|ky ten/.test(boDau(dong(r)))) continue;
+        dm.push({ stt: so1(r[C.stt]) || dm.filter(x => x.nhom === nhom).length + 1, nhom, nhom_ro: 1, nhom_dt: String(['Hóa chất', 'Dược liệu', 'Vật tư tiêu hao'].indexOf(nhom) + 1), ten: t,
+          cong_thuc: C.ct >= 0 ? chu(r[C.ct]) : '', ma_vt: C.ma >= 0 ? chu(r[C.ma]) : '', nsx: C.nsx >= 0 ? chu(r[C.nsx]) : '', dvt: C.dvt >= 0 ? chu(r[C.dvt]) : '',
+          dm: dmTheoSV ? so1(r[C.dm]) : '', sl: C.sl >= 0 ? so1(r[C.sl]) : 0, ghi_chu: C.gc >= 0 ? chu(r[C.gc]) : '' });
+      }
+    });
+    // xếp theo thứ tự nhóm chuẩn (Hóa chất → Dược liệu → Vật tư tiêu hao) dù trong file khác thứ tự
+    const TT = ['Hóa chất', 'Dược liệu', 'Vật tư tiêu hao'];
+    dm.sort((a, b) => TT.indexOf(a.nhom) - TT.indexOf(b.nhom) || a.stt - b.stt); dm.forEach((d, i) => { d.stt = i + 1; }); // STT liên tục theo thứ tự nhóm
+    return { ten: tenMon, mon: '', ma_hp: hp, lop: [{ lop: '', ma_lhp: '', si_so: ss }], dm };
+  }
+  // File "TH & Phòng học" (thời khóa biểu thực hành)
+  function docTKB(rows) {
+    const h = rows.findIndex(r => r.some(c => /ma lhp/.test(boDau(chu(c)))) && r.some(c => /ten mon/.test(boDau(chu(c)))));
+    if (h < 0) throw new Error('Không thấy dòng tiêu đề (cần cột "MÃ LHP", "TÊN MÔN HỌC")');
+    // file TKB của Trường: tiêu đề 2 tầng ("Lịch học" → Thứ, Từ tiết, Đến tiết, Loại lịch, Nhóm, Sĩ số; "Thời gian học" → Bắt đầu, Kết thúc) → tìm ở cả dòng dưới
+    const H = rows[h], H2 = rows[h + 1] || [], t2 = (re) => { const i = tim(H, re); return i >= 0 ? i : tim(H2, re); };
+    const C = { lhp: t2(/ma lhp/), mon: t2(/ten mon/), lop: t2(/^lop hoc$/), lopdk: t2(/lop du kien/), thu: t2(/^thu$/), loai: t2(/loai lich/),
+      tu: t2(/tu tiet/), den: t2(/den tiet/), nhom: t2(/^nhom$/), ss: t2(/^si so|^sy so/), bd: t2(/bat dau/), kt: t2(/ket thuc/), phong: t2(/phong/), gv: t2(/giang vien/) };
+    const gv = (v) => chu(v).replace(/^[A-Z]{0,3}\d{5,}\s*-\s*/, '').replace(/[,;\s]+$/, ''); // "01140029 - Lâm Khắc Kỷ," → "Lâm Khắc Kỷ"
+    // chỉ lấy ca thực hành: cột "Loại lịch" = TH (bỏ LT); file không có cột này thì lấy mọi dòng
+    const coMa = rows.slice(h + 1).filter(r => r && /^\d{6,}/.test(chu(r[C.lhp]))), laTH = (r) => C.loai < 0 || !chu(r[C.loai]) || /\bTH\b/i.test(chu(r[C.loai]));
+    const kq = coMa.filter(laTH).map(r => ({
+      ma_lhp: chu(r[C.lhp]), ten_mon: chu(r[C.mon]), lop: chu(r[C.lopdk]) || chu(r[C.lop]), nhom: chu(r[C.nhom]), si_so: so1(r[C.ss]), thu: chu(r[C.thu]),
+      tiet: [chu(r[C.tu]), chu(r[C.den])].filter(Boolean).join('–'), bat_dau: chuanNgay(r[C.bd]), ket_thuc: chuanNgay(r[C.kt]), phong: chu(r[C.phong]), gv: gv(r[C.gv]) }));
+    kq.bo_lt = coMa.length - kq.length; // số dòng lý thuyết đã bỏ
+    return kq;
+  }
+  // File danh mục mã vật tư của Trường
+  function docMaVT(rows) {
+    const h = rows.findIndex(r => r.some(c => /ma vat tu/.test(boDau(chu(c)))) && r.some(c => /danh muc/.test(boDau(chu(c)))));
+    if (h < 0) throw new Error('Không thấy dòng tiêu đề (cần cột "MÃ VẬT TƯ", "DANH MỤC VẬT TƯ")');
+    const H = rows[h], C = { ma: tim(H, /ma vat tu/), ten: tim(H, /danh muc/), loai: tim(H, /^loai$/), nsx: tim(H, /^nsx$/), dvt: tim(H, /^dv|don vi/), eff: tim(H, /effect/), nhom: tim(H, /^nhom$/) };
+    return rows.slice(h + 1).filter(r => r && /^\d+$/.test(chu(r[C.ma])) && chu(r[C.ten])).map(r => ({
+      ma_vt: chu(r[C.ma]), ten: chu(r[C.ten]), loai: chu(r[C.loai]), nsx: chu(r[C.nsx]), dvt: chu(r[C.dvt]), ma_effect: C.eff >= 0 ? chu(r[C.eff]) : '', nhom: C.nhom >= 0 ? chu(r[C.nhom]) : '' }));
+  }
+  // Biên bản dụng cụ theo môn (MÔN: …; STT | Tên dụng cụ | NSX | Số lượng …) → định mức DC = 1 bộ cho 1 lớp thực hành (số lượng trong file là của cả lớp; chỉ chia khi tiêu đề ghi "/ n bộ")
+  function docDungCu(rows) {
+    const h = rows.findIndex(r => r && r.some(c => /ten dung cu/.test(boDau(chu(c)))));
+    if (h < 0) throw new Error('Không thấy dòng tiêu đề (cần cột "Tên dụng cụ")');
+    // cột số lượng: "Số lượng", "SL dự trù", "SLG"… – có cả "SL dự trù" và "SL bàn giao" thì lấy cột dự trù
+    const H = rows[h], laSL = (c) => /so luong|^sl\b|^slg\b/.test(c) && !/ban giao|thuc nhan|tra\b|no\b/.test(c), td = H.map(c => boDau(chu(c)).replace(/\s+/g, ' ').trim());
+    const C = { stt: tim(H, /^stt$/), ten: tim(H, /ten dung cu/), nsx: tim(H, /^nsx/), dvt: tim(H, /^dvt|don vi/), gc: tim(H, /ghi chu/),
+      sl: (() => { const j = td.findIndex(c => laSL(c) && /du tru/.test(c)); return j >= 0 ? j : td.findIndex(laSL); })() };
+    if (C.sl < 0) throw new Error('Không thấy cột số lượng (cần cột "Số lượng" hoặc "SL dự trù")');
+    const chia = (/\/\s*(\d+)\s*bo\b/.exec(boDau(chu(H[C.sl]))) || [])[1] || 1;
+    const dongMon = rows.slice(0, h).map(r => (r || []).map(chu).join(' ')).find(t => /^mon\s*:/.test(boDau(t)));
+    const ten = dongMon ? dongMon.replace(/^m[oô]n\s*:\s*/i, '').replace(/\s{2,}.*$/, '').trim() : '';
+    const dm = rows.slice(h + 1).filter(r => r && chu(r[C.ten]) && !/^tong( cong)?\b/.test(boDau(chu(r[C.ten]))) && so1(r[C.sl])).map((r, i) => ({ stt: so1(r[C.stt]) || i + 1, ten: chu(r[C.ten]), nsx: chu(r[C.nsx]),
+      dvt: C.dvt >= 0 ? chu(r[C.dvt]) : 'cái', dm: Math.round(so1(r[C.sl]) / chia * 100) / 100, ghi_chu: C.gc >= 0 ? chu(r[C.gc]) : '', nhom: 'Dụng cụ' }));
+    if (!dm.length) throw new Error('Không đọc được dòng dụng cụ nào (cần tên dụng cụ và số lượng ở cột "' + chu(H[C.sl]) + '")');
+    return { ten, dm, chia: +chia };
+  }
+  window.__PTN_TEST = { ghepCot, chuanNgay, chuanPhong, boDau, docKeHoachVatTu, docPhieuDuTru, docDuTruNhom, docTKB, docMaVT, docDungCu };
+
+  function hopNhapExcel() {
+    moHop('<h2>Nhập thiết bị từ Excel</h2><p class="note">Chọn file Excel danh mục thiết bị (ví dụ "Danh muc thiet bi - Viện CNSH&TP.xlsx"). Hệ thống tự nhận cột theo tiêu đề; anh/chị kiểm tra lại trước khi nhập. Dòng trùng mã tài sản sẽ bị bỏ qua.' + linkMau('thiet_bi') + '</p>' +
+      '<label class="f"><span>File Excel (.xlsx, .xls)</span><input type="file" id="x-file" accept=".xlsx,.xls,.xlsm,.csv"></label><div id="x-kq"></div>');
+    if (window.PTN_MAU_FILE) window.PTN_MAU_FILE.ganLink($('modal-body'));
+    $('x-file').onchange = async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      $('x-kq').innerHTML = '<div class="loading"><div class="spin"></div></div>';
+      try {
+        const X = await napXlsx();
+        const wb = X.read(await file.arrayBuffer(), { cellDates: true });
+        veBuocGhep(X, wb, wb.SheetNames[0]);
+      } catch (err) { $('x-kq').innerHTML = '<p class="err">' + esc(err.message) + '</p>'; }
+    };
+  }
+  function veBuocGhep(X, wb, tenSheet) {
+    const rows = X.utils.sheet_to_json(wb.Sheets[tenSheet], { header: 1, raw: true, defval: '' });
+    let hd = rows.findIndex(r => r.some(c => /t[eê]n/i.test(String(c)) && /(thi[eế]t b[iị]|t[aà]i s[aả]n|m[aá]y)/i.test(String(c))));
+    if (hd < 0) hd = rows.findIndex(r => r.filter(c => c !== '').length >= 2);
+    if (hd < 0) { $('x-kq').innerHTML = '<p class="err">Không tìm thấy dòng tiêu đề.</p>'; return; }
+    const tieuDe = rows[hd].map(c => String(c).replace(/\s+/g, ' ').trim());
+    const map = ghepCot(tieuDe);
+    const du = rows.slice(hd + 1).map((r, i) => ({ r, dong: hd + i + 2 })).filter(x => x.r.some(c => c !== '' && c != null));
+    const chonCot = (k) => '<select data-k="' + k + '"><option value="">— bỏ qua —</option>' + tieuDe.map((t, i) => t ? '<option value="' + i + '"' + (map[k] === i ? ' selected' : '') + '>' + esc(t) + '</option>' : '').join('') + '</select>';
+    $('x-kq').innerHTML = (wb.SheetNames.length > 1 ? '<label class="f"><span>Trang tính</span><select id="x-sheet">' + wb.SheetNames.map(n => '<option' + (n === tenSheet ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select></label>' : '') +
+      '<p><b>' + du.length + '</b> dòng có dữ liệu (tiêu đề ở dòng ' + (hd + 1) + ').</p><div class="tbl-wrap" style="max-height:300px"><table class="import-map"><thead><tr><th>Trường trong hệ thống</th><th>Lấy từ cột</th></tr></thead><tbody>' +
+      TRUONG_TB.map(f => '<tr><td>' + esc(f[1]) + (f[0] === 'ten' ? ' <em style="color:var(--bad)">*</em>' : '') + '</td><td>' + chonCot(f[0]) + '</td></tr>').join('') +
+      '<tr><td>Phòng (lấy mã dạng F6.08 trong ô)</td><td>' + chonCot('phong') + '</td></tr></tbody></table></div>' +
+      '<div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn" id="x-nhap">Nhập ' + du.length + ' dòng</button></div>';
+    if ($('x-sheet')) $('x-sheet').onchange = (e) => veBuocGhep(X, wb, e.target.value);
+    $('x-nhap').onclick = async (e) => {
+      const m = {}; $('x-kq').querySelectorAll('select[data-k]').forEach(s => { if (s.value !== '') m[s.dataset.k] = +s.value; });
+      if (m.ten === undefined) return toast('Chọn cột "Tên thiết bị"', true);
+      const ds = du.map(({ r, dong }) => {
+        const o2 = { _dong: dong };
+        Object.keys(m).forEach(k => { let v = r[m[k]]; if (['ngay_nhan', 'kd_gan', 'kd_ke', 'bd_gan', 'bd_ke'].indexOf(k) >= 0) v = chuanNgay(v); else if (k === 'phong') v = chuanPhong(v); else v = v instanceof Date ? chuanNgay(v) : String(v == null ? '' : v).trim(); o2[k] = v; });
+        if (o2.nguyen_gia) o2.nguyen_gia = String(o2.nguyen_gia).replace(/[^\d]/g, '');
+        return o2;
+      }).filter(x => x.ten);
+      const r = await chay(e.target, () => api('tb_nhap', { ds }));
+      $('x-kq').innerHTML = '<div class="card"><b>Đã thêm ' + r.them + ' thiết bị.</b>' + (r.bo_qua.length ? '<p>Bỏ qua ' + r.bo_qua.length + ' dòng:</p><ul>' + r.bo_qua.map(t => '<li>' + esc(t) + '</li>').join('') + '</ul>' : '') + '</div><div class="modal-foot"><button class="btn" data-dong>Đóng</button></div>';
+      if (location.hash.indexOf('#/tai-san') === 0) setTimeout(dieuHuong, 300);
+    };
+  }
+  // Danh mục thiết bị: bảng A4 ngang có định dạng (xem trước → in / tải Excel)
+  function xuatExcel(ds) {
+    const ten = (ma) => (S.dm.phong.find(p => p.ma === ma) || {}).ma || ma || '';
+    window.PTN_IN.xemTruoc({ ten: 'Danh muc thiet bi Vien CNSH TP ' + homNay(), trang: [window.PTN_IN.bang({ ten: 'Danh muc thiet bi', huong: 'ngang', tieuDe: 'DANH MỤC THIẾT BỊ PHÒNG THÍ NGHIỆM',
+      phuDe: 'Viện Công nghệ Sinh học và Thực phẩm – cập nhật ngày ' + ngayVN(homNay()), ngay: 'TP. HCM, ngày ' + homNay().slice(8) + ' tháng ' + homNay().slice(5, 7) + ' năm ' + homNay().slice(0, 4),
+      cot: [{ ten: 'STT', rong: 5, can: 'c' }, { ten: 'MÃ TÀI SẢN', rong: 13 }, { ten: 'TÊN THIẾT BỊ', rong: 34 }, { ten: 'PHÒNG', rong: 9, can: 'c' }, { ten: 'HÃNG – MODEL', rong: 20 }, { ten: 'SỐ SERIAL', rong: 13 },
+        { ten: 'NĂM SD', rong: 8, can: 'c' }, { ten: 'NGUYÊN GIÁ (đ)', rong: 14, dd: '0' }, { ten: 'TÌNH TRẠNG', rong: 14 }, { ten: 'KĐ KẾ TIẾP', rong: 11, can: 'c' }, { ten: 'GHI CHÚ', rong: 22 }],
+      dong: ds.map((x, i) => [i + 1, x.ma_ts, x.ten, ten(x.phong), [x.hang, x.model].filter(Boolean).join(' – '), x.serial, (x.ngay_nhan || '').slice(0, 4), +x.nguyen_gia || '', x.tinh_trang, ngayVN(x.kd_ke), x.ghi_chu]),
+      tong: ['', '', 'Tổng: ' + ds.length + ' thiết bị', '', '', '', '', ds.reduce((a, x) => a + (+x.nguyen_gia || 0), 0) || '', '', '', ''],
+      ky: [['NGƯỜI LẬP', '(Ký, ghi rõ họ tên)'], ['VIỆN TRƯỞNG', '(Ký, ghi rõ họ tên)']] })] }); // họ tên người ký tự điền (PTN_KY)
+  }
+
+
+  // ---------------- Kiểm định – bảo dưỡng ----------------
+  async function manKiemDinh() {
+    const bd = /bd=1/.test(location.hash);
+    const nd = trang('Kiểm định – bảo dưỡng', '<div class="btns"><a class="btn ' + (bd ? 'o ' : '') + 'sm" href="#/kiem-dinh">Kiểm định</a><a class="btn ' + (bd ? '' : 'o ') + 'sm" href="#/kiem-dinh?bd=1">Bảo dưỡng</a></div>');
+    const ds = (await api('tb_ds')).filter(x => x.tinh_trang !== 'Đã thanh lý');
+    const k = bd ? 'bd_ke' : 'kd_ke', hn = homNay(), d30 = congNgay(30), d60 = congNgay(60), ten = bd ? 'bảo dưỡng' : 'kiểm định';
+    const nhom = [['Quá hạn', x => x[k] && x[k] < hn], ['Trong 30 ngày', x => x[k] >= hn && x[k] <= d30], ['Trong 31 – 60 ngày', x => x[k] > d30 && x[k] <= d60],
+      ['Sau 60 ngày', x => x[k] > d60], ['Chưa có lịch ' + ten, x => !x[k]]];
+    nd.innerHTML = nhom.map(([t, f]) => {
+      const l = ds.filter(f).sort((a, b) => (a[k] || '').localeCompare(b[k] || ''));
+      return '<div class="card"><h2>' + t + ' (' + l.length + ')</h2>' + (l.length ? '<div class="tbl-wrap"><table><thead><tr><th>Thiết bị</th><th>Mã TS</th><th>Phòng</th><th>Gần nhất</th><th>Kế tiếp</th><th></th></tr></thead><tbody>' +
+        l.map(x => '<tr><td><a href="#/tai-san/' + esc(x.id) + '">' + esc(x.ten) + '</a></td><td class="mono">' + esc(x.ma_ts) + '</td><td>' + esc(x.phong) + '</td><td>' + ngayVN(bd ? x.bd_gan : x.kd_gan) + '</td><td>' + hanTag(x[k]) + '</td>' +
+          '<td><button class="btn o sm" data-ghi="' + esc(x.id) + '">Ghi ' + ten + '</button></td></tr>').join('') + '</tbody></table></div>' : '<div class="note">Không có.</div>') + '</div>';
+    }).join('');
+    nd.querySelectorAll('[data-ghi]').forEach(b => { b.onclick = () => hopSuKien(ds.find(x => x.id === b.dataset.ghi), bd ? 'bao_duong' : 'kiem_dinh'); });
+  }
+
+  // ---------------- Cán bộ (admin): tài khoản Gmail + mật khẩu, phân quyền theo mục ----------------
+  const MUC_DO = [['', 'Không'], ['xem', 'Xem'], ['xu_ly', 'Xử lý']];
+  function tomTatQuyen(q) {
+    if (!q) return '<span class="tag t-ok">Toàn quyền</span>';
+    const M = S.toi.muc_quyen || [], xl = M.filter(m => q[m[0]] === 'xu_ly').length, xem = M.filter(m => q[m[0]] === 'xem').length;
+    const mau = (S.toi.mau_quyen || []).find(m => M.every(x => (m.quyen[x[0]] || '') === (q[x[0]] || '')));
+    return (mau ? '<b>' + esc(mau.ten) + '</b><br>' : '') + '<span class="note">' + xl + ' mục xử lý · ' + xem + ' mục chỉ xem · ' + (M.length - xl - xem) + ' mục ẩn</span>';
+  }
+  // bảng chọn quyền: mỗi mục một dòng, 3 mức Không / Xem / Xử lý
+  function bangQuyen(q) {
+    return '<div class="tbl-wrap"><table class="bang-quyen"><thead><tr><th>Mục trên trang quản lý</th>' + MUC_DO.map(m => '<th>' + m[1] + '</th>').join('') + '</tr></thead><tbody>' +
+      (S.toi.muc_quyen || []).map(m => '<tr><td>' + esc(m[1]) + '</td>' + MUC_DO.map(d => '<td><input type="radio" name="q_' + m[0] + '" value="' + d[0] + '"' + ((q[m[0]] || '') === d[0] ? ' checked' : '') + ' aria-label="' + esc(m[1] + ': ' + d[1]) + '"></td>').join('') + '</tr>').join('') +
+      '</tbody></table></div><p class="note">Xem: xem, in, tải file. Xử lý: xem và nhập, sửa, duyệt, cấp phát. Hôm nay và Tài khoản luôn mở. Cài đặt, Cán bộ, Nhật ký, xóa dữ liệu: chỉ admin.</p>';
+  }
+  function docBangQuyen(root) { const q = {}; (S.toi.muc_quyen || []).forEach(m => { const r = root.querySelector('[name="q_' + m[0] + '"]:checked'); q[m[0]] = r ? r.value : ''; }); return q; }
+  function ganMauQuyen(root) {
+    root.querySelectorAll('[data-mau]').forEach(b => { b.onclick = () => { const m = (S.toi.mau_quyen || []).find(x => x.ma === b.dataset.mau);
+      Object.keys(m.quyen).forEach(k => { const r = root.querySelector('[name="q_' + k + '"][value="' + (m.quyen[k] || '') + '"]'); if (r) r.checked = true; }); }; });
+  }
+  const nutMau = () => '<div class="btns mau-quyen"><span class="note">Mẫu nhanh:</span>' + (S.toi.mau_quyen || []).map(m => '<button type="button" class="btn o sm" data-mau="' + esc(m.ma) + '">' + esc(m.ten) + '</button>').join('') + '</div>';
+  const oMatKhau = (ten, nhan, help) => '<div class="mk-o">' + o(ten, nhan, { type: 'password', extra: ' autocomplete="new-password"', help }) + '<button type="button" class="mk-hien" title="Hiện / ẩn mật khẩu">👁</button></div>';
+
+  async function manCanBo() {
+    if (!laAdmin()) { location.hash = '#/tong-quan'; return; }
+    const nd = trang('Cán bộ', '<button class="btn sm" id="b-them-cb">+ Thêm cán bộ</button>');
+    const ds = await api('canbo_ds');
+    const coCB = ds.some(c => c.quyen);
+    nd.innerHTML = '<div class="card huong-dan-pq"><h2>Phân quyền cán bộ</h2>' + (coCB
+        ? '<p>Bấm nút <b>Phân quyền</b> ở dòng của từng cán bộ để chọn mục được <b>Xem</b> hoặc <b>Xử lý</b> (có mẫu nhanh). Admin luôn có toàn quyền.</p>'
+        : '<p>Hiện chỉ có tài khoản admin nên chưa có ai để phân quyền.</p><ol><li>Bấm <b>+ Thêm cán bộ</b> (góc phải trên): nhập họ tên, <b>Gmail cá nhân</b>, mật khẩu (để trống – hệ thống tự tạo), chọn <b>Phân quyền ban đầu</b>.</li><li>Gửi Gmail + mật khẩu cho cán bộ.</li><li>Muốn chỉnh chi tiết: bấm nút <b>Phân quyền</b> hiện ở dòng của cán bộ đó.</li></ol>') + '</div>' +
+      '<div class="tbl-wrap"><table><thead><tr><th>Họ tên</th><th>Gmail đăng nhập</th><th>Vai trò</th><th>Quyền</th><th>Trạng thái</th><th>Ngày tạo</th><th></th></tr></thead><tbody>' +
+      ds.map(c => '<tr><td><b>' + esc(c.ten) + '</b>' + (c.ghi_chu ? '<div class="note">' + esc(c.ghi_chu) + '</div>' : '') + '</td><td>' + esc(c.email) + '</td><td>' + esc(c.vai_tro) + '</td><td>' + tomTatQuyen(c.quyen) + '</td><td>' +
+        (c.trang_thai === 'Hoạt động' ? '<span class="tag t-ok">Hoạt động</span>' : '<span class="tag t-gray">Khóa</span>') + '</td><td>' + ngayVN(c.ngay_tao) + '</td>' +
+        '<td class="btns">' + (c.quyen ? '<button class="btn sm" data-quyen="' + esc(c.email) + '">Phân quyền</button>' : '') + '<button class="btn o sm" data-sua="' + esc(c.email) + '">Sửa</button><button class="btn o sm" data-pin="' + esc(c.email) + '">Cấp lại mật khẩu</button></td></tr>').join('') + '</tbody></table></div>' +
+      '<p class="note">Cán bộ đăng nhập bằng <b>Gmail cá nhân</b> + <b>mật khẩu do admin cấp</b>. Mật khẩu chỉ hiện một lần khi tạo / cấp lại; cán bộ nên đổi mật khẩu ở mục Tài khoản. Khóa tài khoản hoặc cấp lại mật khẩu sẽ đăng xuất cán bộ khỏi mọi máy. Bấm <b>Phân quyền</b> để chọn mục cán bộ được xem / xử lý.</p>';
+    $('b-them-cb').onclick = () => {
+      moHop('<h2>Thêm cán bộ</h2><form id="f">' + o('ten', 'Họ tên', { req: 1 }) + o('email', 'Gmail cá nhân (dùng để đăng nhập)', { type: 'email', req: 1, ph: 'ten.canbo@gmail.com' }) +
+        oMatKhau('mat_khau', 'Mật khẩu', 'Để trống: hệ thống tự tạo mật khẩu 8 ký tự. Tự đặt: 8 – 32 ký tự, có cả chữ và số.') +
+        o('vai_tro', 'Vai trò', { select: [['Cán bộ PTN', 'Cán bộ PTN'], ['Admin', 'Admin (toàn quyền: quản lý cán bộ, cài đặt, xóa dữ liệu)']] }) +
+        o('mau_quyen', 'Phân quyền ban đầu (sửa chi tiết sau bằng nút Phân quyền)', { select: (S.toi.mau_quyen || []).map(m => [m.ma, m.ten]) }) + o('ghi_chu', 'Ghi chú', {}) +
+        '<div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Tạo tài khoản</button></div></form>');
+      ganHienMatKhau($('f'));
+      $('f').onsubmit = async (e) => { e.preventDefault(); const r = await chay(e.submitter, () => api('canbo_them', { cb: giaTri(e.target) })); hienPin(r); };
+    };
+    nd.querySelectorAll('[data-pin]').forEach(b => { b.onclick = () => {
+      moHop('<h2>Cấp lại mật khẩu – ' + esc(b.dataset.pin) + '</h2><form id="f">' + oMatKhau('mat_khau', 'Mật khẩu mới', 'Để trống: hệ thống tự tạo. Tự đặt: 8 – 32 ký tự, có cả chữ và số.') +
+        '<p class="note">Mật khẩu cũ hết hiệu lực, cán bộ bị đăng xuất khỏi các máy.</p><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Cấp mật khẩu</button></div></form>');
+      ganHienMatKhau($('f'));
+      $('f').onsubmit = async (e) => { e.preventDefault(); hienPin(await chay(e.submitter, () => api('canbo_cap_pin', { email: b.dataset.pin, mat_khau: giaTri(e.target).mat_khau }))); };
+    }; });
+    nd.querySelectorAll('[data-quyen]').forEach(b => { b.onclick = () => {
+      const c = ds.find(x => x.email === b.dataset.quyen);
+      moHop('<h2>Phân quyền – ' + esc(c.ten) + '</h2><p class="note" style="margin-top:-6px">' + esc(c.email) + '</p><form id="f">' + nutMau() + bangQuyen(c.quyen) +
+        '<div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu phân quyền</button></div></form>');
+      ganMauQuyen($('f'));
+      $('f').onsubmit = async (e) => { e.preventDefault(); await chay(e.submitter, () => api('canbo_quyen', { email: c.email, quyen: docBangQuyen(e.target) })); dongHop(); toast('Đã lưu phân quyền. Cán bộ thấy thay đổi khi tải lại trang.'); dieuHuong(); };
+    }; });
+    nd.querySelectorAll('[data-sua]').forEach(b => { b.onclick = () => {
+      const c = ds.find(x => x.email === b.dataset.sua);
+      moHop('<h2>Sửa – ' + esc(c.email) + '</h2><form id="f">' + o('ten', 'Họ tên', { v: c.ten, req: 1 }) + o('vai_tro', 'Vai trò', { select: ['Cán bộ PTN', 'Admin'], v: c.vai_tro }) +
+        o('trang_thai', 'Trạng thái', { select: ['Hoạt động', 'Khóa'], v: c.trang_thai }) + o('ghi_chu', 'Ghi chú', { v: c.ghi_chu }) +
+        '<div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu</button></div></form>');
+      $('f').onsubmit = async (e) => { e.preventDefault(); const v = giaTri(e.target); v.email = c.email; await chay(e.submitter, () => api('canbo_sua', { cb: v })); dongHop(); toast('Đã lưu'); dieuHuong(); };
+    }; });
+  }
+  function hienPin(r) {
+    moHop('<h2>Mật khẩu của ' + esc(r.email) + '</h2><div class="pin-show">' + esc(r.pin) + '</div><p class="note">Ghi lại và gửi riêng cho cán bộ (tin nhắn / email cá nhân). Mật khẩu sẽ <b>không hiện lại</b>. Cán bộ đăng nhập bằng Gmail này rồi đổi mật khẩu ở mục Tài khoản.</p>' +
+      '<div class="modal-foot"><button class="btn o" id="b-copy">Sao chép</button><button class="btn" data-dong>Xong</button></div>');
+    $('b-copy').onclick = () => { try { navigator.clipboard.writeText(r.pin); toast('Đã sao chép'); } catch (e) { /* trình duyệt chặn */ } };
+    $('modal').addEventListener('click', function f(e) { if (e.target.dataset && e.target.dataset.dong !== undefined) { $('modal').removeEventListener('click', f); dieuHuong(); } });
+  }
+
+  // ---------------- Nhật ký (admin) ----------------
+  async function manNhatKy() {
+    if (!laAdmin()) { location.hash = '#/tong-quan'; return; }
+    const nd = trang('Nhật ký thao tác');
+    const ds = await api('nhatky_ds', { n: 1000 });
+    nd.innerHTML = '<div class="tools"><input type="search" id="q" placeholder="Tìm người, hành động, đối tượng…"></div><div id="kq"></div>';
+    const ve = () => {
+      const q = boDau($('q').value), l = ds.filter(x => !q || boDau([x.email, x.hanh_dong, x.doi_tuong, x.chi_tiet].join(' ')).indexOf(q) >= 0).slice(0, 500);
+      $('kq').innerHTML = '<div class="tbl-wrap"><table><thead><tr><th>Thời gian</th><th>Người</th><th>Hành động</th><th>Đối tượng</th><th>Chi tiết</th></tr></thead><tbody>' +
+        l.map(x => '<tr><td style="white-space:nowrap">' + ngayVN(x.tg) + '</td><td>' + esc(x.email) + '</td><td>' + esc(x.hanh_dong) + '</td><td>' + (/^TB\d+$/.test(x.doi_tuong) ? '<a href="#/tai-san/' + esc(x.doi_tuong) + '">' + esc(x.doi_tuong) + '</a>' : esc(x.doi_tuong)) + '</td><td class="note">' + esc(String(x.chi_tiet).slice(0, 300)) + '</td></tr>').join('') + '</tbody></table></div>';
+    };
+    $('q').oninput = ve; ve();
+  }
+
+  // ---------------- Tài khoản ----------------
+  async function manTaiKhoan() {
+    const nd = trang('Tài khoản');
+    const ph = await api('phien_ds'), q = S.toi.quyen;
+    const quyenToi = q ? '<div class="tbl-wrap"><table><thead><tr><th>Mục</th><th>Quyền</th></tr></thead><tbody>' + (S.toi.muc_quyen || []).map(m => '<tr><td>' + esc(m[1]) + '</td><td>' +
+      (q[m[0]] === 'xu_ly' ? '<span class="tag t-ok">Xem và xử lý</span>' : q[m[0]] === 'xem' ? '<span class="tag t-info">Chỉ xem</span>' : '<span class="tag t-gray">Không</span>') + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<p><span class="tag t-ok">Admin – toàn quyền</span></p>';
+    nd.innerHTML = '<div class="grid g2"><div class="card"><h2>Đổi mật khẩu</h2><p class="note" style="margin-top:-4px">Đăng nhập: <b>' + esc(S.toi.nguoi.email) + '</b></p><form id="f">' +
+      oMatKhau('cu', 'Mật khẩu hiện tại') + oMatKhau('moi', 'Mật khẩu mới (8 – 32 ký tự, có cả chữ và số)') + oMatKhau('lai', 'Nhập lại mật khẩu mới') +
+      '<button class="btn">Đổi mật khẩu</button><p class="note">Đổi mật khẩu sẽ đăng xuất các máy khác. Quên mật khẩu: liên hệ admin để được cấp lại.</p></form></div>' +
+      '<div class="card"><h2>Quyền của tôi</h2>' + quyenToi + (q ? '<p class="note">Cần thêm quyền: liên hệ admin.</p>' : '') + '</div>' +
+      '<div class="card" style="grid-column:1/-1"><h2>' + (laAdmin() ? 'Các máy đang đăng nhập (tất cả cán bộ)' : 'Các máy đang đăng nhập') + '</h2>' +
+      (ph.length ? '<ul class="files">' + ph.map(p => '<li><span><b>' + esc(p.may || 'Không rõ') + '</b>' + (p.hien_tai ? ' <span class="tag t-ok">máy này</span>' : '') + '<br><span class="note">' + esc((laAdmin() ? p.email + ' · ' : '') + 'đăng nhập ' + ngayVN(p.tao) + ' · hoạt động ' + ngayVN(p.cuoi) + (p.ghi_nho === 'Có' ? ' · ghi nhớ' : '')) + '</span></span>' +
+        (p.hien_tai ? '' : '<button class="btn red sm" data-huy="' + esc(p.ma) + '">Đăng xuất</button>') + '</li>').join('') + '</ul>' : '<div class="note">Không có.</div>') + '</div></div>';
+    ganHienMatKhau($('f'));
+    $('f').onsubmit = async (e) => {
+      e.preventDefault(); const v = giaTri(e.target);
+      if (v.moi !== v.lai) return toast('Mật khẩu nhập lại không khớp', true);
+      await chay(e.submitter, () => api('doi_pin', { cu: v.cu, moi: v.moi })); e.target.reset(); toast('Đã đổi mật khẩu'); dieuHuong();
+    };
+    nd.querySelectorAll('[data-huy]').forEach(b => { b.onclick = async (e) => { if (!confirm('Đăng xuất phiên này?')) return; await chay(e.target, () => api('phien_huy', { ma: b.dataset.huy })); toast('Đã đăng xuất phiên'); dieuHuong(); }; });
+  }
+
+  // địa chỉ trang quản lý / trang công khai (để in mã QR: điện thoại quét là mở đúng trang)
+  function lienKet(duong) { return location.href.split('#')[0].replace(/[?].*$/, '') + '#/' + duong; }
+  function trangCongKhai() { return location.href.split('#')[0].replace(/[?].*$/, '').replace(/quan-ly\/(index\.html|chay-thu\.html)?$/, ''); }
+  // dùng chung cho app-mo-rong.js
+  window.PTN_QL = { S, $, api, chay, trang, moHop, dongHop, o, giaTri, esc, toast, ngayVN, homNay, congNgay, boDau, tien, fmt, tag, hanTag, laAdmin, quyen, coQuyen, dieuHuong, napXlsx, napQR,
+    guiTep, taiVe, docB64, dsPhongChon, phongTen, capNhatDanhMuc, lienKet, trangCongKhai, MENU, TUYEN, DEMO, ganDieuHuong, hopDonVaoBB, nhapFileHC, nhapFileDC, icon, docKeHoachVatTu, docPhieuDuTru, docDuTruNhom, hopFileExcel, ganGoiYVT };
+  document.addEventListener('DOMContentLoaded', batDau);
+})();

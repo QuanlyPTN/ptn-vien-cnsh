@@ -130,7 +130,7 @@
     'Đăng ký thay / mạo danh người khác bị xử lý như vi phạm nội quy.</div>' +
     '<label class="opt"><input type="checkbox" name="cam_ket"><span>Tôi cam kết thông tin trên là đúng; thực hiện đúng nội quy, quy định của PTN Viện CNSH&TP và chịu trách nhiệm bồi thường nếu làm hư hỏng, mất mát tài sản.</span></label>';
   const MON_TAY = '__tay'; // QR3: chọn "Môn khác – nhập thủ công"
-  const PHONG_TB_QR2 = 'F4.03'; // QR2: chỉ cho mượn thiết bị đặt tại phòng này
+  const PHONG_TB_QR2 = 'F4.02'; // QR2: chỉ cho mượn thiết bị đặt tại phòng này
   const dsPhong = () => S.dm.phong.map(p => [p.ma, '<b>' + esc(p.ma) + '</b> – ' + esc(p.ten)]);
   const dsTB = (phong) => S.dm.thiet_bi.filter(t => !phong || t.phong === phong).map(t => [t.id, esc(t.ten) + (t.ma_ts ? ' <span class="note">' + esc(t.ma_ts) + '</span>' : '') + (phong ? '' : ' <span class="note">· ' + esc(t.phong || '—') + '</span>') + (t.ban ? ' <span class="note">(đang bận / hỏng)</span>' : ''), t.ban]);
   // QR2, QR3: môn thực hành – giảng viên (gộp các lớp / nhóm cùng môn, cùng GV; giá trị = một lớp học phần đại diện)
@@ -315,7 +315,7 @@
           nhap('gvhd', 'Giảng viên hướng dẫn / giảng viên dạy thực hành');
         break;
       case 'QR2':
-        { // thiết bị phòng F4.03 (kho thiết bị cho mượn) + gõ tay thiết bị ngoài danh sách; Dùng cho thay cho "Mục đích sử dụng"
+        { // thiết bị phòng F4.02 (kho thiết bị cho mượn) + gõ tay thiết bị ngoài danh sách; Dùng cho thay cho "Mục đích sử dụng"
           const tb = dsTB(PHONG_TB_QR2), mon = dsMonGV('');
           f = truong('Thiết bị cần mượn (phòng ' + PHONG_TB_QR2 + ')', tb.length ? '<input type="search" id="tim-tb" placeholder="Tìm tên thiết bị…">' : '<div class="h">Phòng ' + PHONG_TB_QR2 + ' chưa có thiết bị trong danh mục – nhập ở ô dưới.</div>', { req: 1 }) +
             '<div id="o-tb2">' + (tb.length ? chon('thiet_bi', '', tb, { nhieu: 1 }) : '') + '</div>' +

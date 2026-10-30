@@ -228,7 +228,7 @@
   // ---------------- Khung trang ----------------
   const MENU = [
     ['tong-quan', '◧', 'Hôm nay'], ['don', '✉', 'Đơn đăng ký QR1 – QR8'], ['de-tai', '✎', 'Hồ sơ đề tài KLTN – NCKH'], ['nguoi-dung', '☺', 'Người dùng trang dùng chung'], ['phong', '▦', 'Phòng thí nghiệm'], ['lich-phong-th', '▦', 'Lịch phòng thực hành'], ['tai-san', '⚙', 'Tài sản'],
-    ['kiem-dinh', '✓', 'Kiểm định – bảo dưỡng'], ['hoa-chat', '⚗', 'Hóa chất – vật tư'], ['kho', '▣', 'Kho hóa chất F4.01'], ['kho-dl', '❀', 'Kho dược liệu'],
+    ['kiem-dinh', '✓', 'Kiểm định – bảo dưỡng'], ['hoa-chat', '⚗', 'Hóa chất – vật tư'], ['kho', '▣', 'Kho hóa chất F4.02'], ['kho-dl', '❀', 'Kho dược liệu'],
     ['bien-ban', '▤', 'Biên bản bàn giao'], ['bao-cao', '▥', 'Báo cáo – thống kê'], ['so', '☷', 'Sổ theo dõi – in ấn'], ['bieu-mau', '⎙', 'Biểu mẫu PTN'],
     ['giang-vien', '☺', 'Giảng viên'], ['lich-su-tai', '↺', 'Lịch sử tải file'], ['cai-dat', '⚑', 'Cài đặt – mã QR tổng', 1], ['can-bo', '☺', 'Cán bộ', 1], ['nhat-ky', '☰', 'Nhật ký', 1], ['tai-khoan', '⚿', 'Tài khoản']
   ];
@@ -957,7 +957,7 @@
       'Theo dõi dụng cụ, thiết bị, tủ, chìa khóa của từng nhóm; chỉ đóng hồ sơ khi đã trả đủ.', 'Minh chứng đề tài NCKH: upload (không bắt buộc). Phụ lục 3: in lệ phí + trạng thái "Đã thu phí".']],
     'hoa-chat': ['Hóa chất – vật tư', 'Giai đoạn 4', ['Danh mục vật tư theo mã VT của Trường (~3.600 mã, nhập từ file "Mã vật tư – mã bài tập"); đánh dấu hóa chất kiểm soát đặc biệt.',
       'Định mức theo bài thực hành (mã BT) – dữ liệu cốt lõi.', 'Upload thời khóa biểu thực hành → tự tính kế hoạch vật tư (theo học kỳ hoặc theo tháng) → xuất đúng mẫu gửi P.KHĐT.',
-      'Kho hóa chất F4.01: nhập – xuất – tồn, cảnh báo sắp hết / hết hạn, lưu COA; sổ theo dõi tiền chất.']],
+      'Kho hóa chất F4.02: nhập – xuất – tồn, cảnh báo sắp hết / hết hạn, lưu COA; sổ theo dõi tiền chất.']],
     'bien-ban': ['Biên bản bàn giao', 'Giai đoạn 4', ['Tự tạo biên bản hóa chất, dụng cụ cho từng lớp học phần theo form chuẩn; tải về in, soạn, giao lớp.',
       'Cây thư mục Năm học → Học kỳ → Môn → Lớp.', 'QR3 cấp bổ sung cộng thẳng vào biên bản hóa chất; hóa chất ngoài danh sách → thêm dòng + cảnh báo.',
       'Biên bản dụng cụ 2 nhánh: lớp thực hành và KLTN – NCKH; QR8 mượn thêm ghi thẳng vào biên bản, ghi chú người mượn; theo dõi trả – còn nợ.',
@@ -1226,7 +1226,7 @@
     if (/^\d{4}$/.test(s)) return s + '-01-01';
     return s; // máy chủ sẽ báo dòng sai ngày
   }
-  function chuanPhong(v) { const m = /([A-Z])\s?(\d{1,2})\.(\d{2})([A-Z](?![a-zà-ỹ]))?/i.exec(String(v || '')); return m ? (m[1].toUpperCase() + (+m[2]) + '.' + m[3] + (m[4] || '').toUpperCase()) : ''; } // mã phòng Viện: F4.03, F7.08A, D10.01
+  function chuanPhong(v) { const m = /([A-Z])\s?(\d{1,2})\.(\d{2})([A-Z](?![a-zà-ỹ]))?/i.exec(String(v || '')); return m ? (m[1].toUpperCase() + (+m[2]) + '.' + m[3] + (m[4] || '').toUpperCase()) : ''; } // mã phòng Viện: F4.02, F7.08A, D10.01
   // ---- Bộ đọc các file Excel của PTN (mảng hàng như SheetJS sheet_to_json header:1) ----
   const so1 = (v) => { const n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isNaN(n) ? 0 : n; };
   const chu = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();

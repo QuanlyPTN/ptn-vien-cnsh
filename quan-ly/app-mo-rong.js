@@ -427,8 +427,8 @@
       '<div class="card"><h2>Sử dụng 60 ngày gần đây (' + r.su_dung.length + ')</h2>' + (r.su_dung.length ? '<div style="max-height:300px;overflow:auto">' + r.su_dung.map(d => '<div class="note"><b>' + d.qr + '</b> ' + ngayVN(d.tu_ngay || d.tg) + (d.den_ngay ? ' → ' + esc(d.den_ngay.slice(11) || ngayVN(d.den_ngay)) : '') + ' · ' + esc(d.ho_ten) + ' · ' + esc(d.trang_thai) + '</div>').join('') + '</div>' : '<div class="note">Chưa có lượt sử dụng.</div>') + '</div></div></div>';
   };
 
-  // ---------------- Kho hóa chất F4.01 / Kho dược liệu ----------------
-  const KHO = { HC: { ten: 'Kho hóa chất F4.01', duong: 'kho', vat: 'hóa chất' }, DL: { ten: 'Kho dược liệu', duong: 'kho-dl', vat: 'dược liệu' } };
+  // ---------------- Kho hóa chất F4.02 / Kho dược liệu ----------------
+  const KHO = { HC: { ten: 'Kho hóa chất F4.02', duong: 'kho', vat: 'hóa chất' }, DL: { ten: 'Kho dược liệu', duong: 'kho-dl', vat: 'dược liệu' } };
   const manKhoDL = (p) => manKho(p, 'DL');
   async function manKho(p, kho) {
     kho = kho === 'DL' ? 'DL' : 'HC'; const K = KHO[kho];
@@ -458,7 +458,7 @@
     $('b-xuat').onclick = () => hopXuatKho(null, ds);
     $('b-xuat-x').onclick = () => {
       const dong = []; ds.forEach((g, i) => (g.lo.length ? g.lo : [{}]).forEach((x, j) => dong.push([j ? '' : i + 1, j ? '' : (kho === 'HC' ? g.ma_vt || 'Chưa MVT' : g.ten_kh || ''), j ? '' : g.ten, j ? '' : g.dvt, x.so_lo || '', ngayVN(x.han_dung || ''), x.ton || 0, j ? '' : g.ton, x.cho || '', j ? '' : g.canh_bao.join(', ')])));
-      window.PTN_IN.xemTruoc({ ten: (kho === 'HC' ? 'Ton kho hoa chat F4.01 ' : 'Ton kho duoc lieu ') + homNay(), trang: [window.PTN_IN.bang({ ten: 'Ton kho', tieuDe: 'BẢNG TỒN KHO ' + K.ten.toUpperCase(), phuDe: 'Tính đến ngày ' + ngayVN(homNay()),
+      window.PTN_IN.xemTruoc({ ten: (kho === 'HC' ? 'Ton kho hoa chat F4.02 ' : 'Ton kho duoc lieu ') + homNay(), trang: [window.PTN_IN.bang({ ten: 'Ton kho', tieuDe: 'BẢNG TỒN KHO ' + K.ten.toUpperCase(), phuDe: 'Tính đến ngày ' + ngayVN(homNay()),
         cot: [{ ten: 'STT', rong: 5, can: 'c' }, { ten: kho === 'HC' ? 'MÃ VT' : 'TÊN KHOA HỌC', rong: kho === 'HC' ? 9 : 20 }, { ten: 'TÊN ' + K.vat.toUpperCase(), rong: 34 }, { ten: 'ĐVT', rong: 7, can: 'c' }, { ten: 'SỐ LÔ', rong: 11 }, { ten: 'HẠN DÙNG', rong: 11, can: 'c' },
           { ten: 'TỒN LÔ', rong: 10 }, { ten: 'TỔNG TỒN', rong: 10 }, { ten: 'VỊ TRÍ', rong: 18 }, { ten: 'CẢNH BÁO', rong: 11 }], dong, huong: 'ngang', ky: [['NGƯỜI LẬP', '(Ký, ghi rõ họ tên)'], ['VIỆN TRƯỞNG', '(Ký, ghi rõ họ tên)']] })] });
     };
@@ -612,7 +612,7 @@
       (r.so.length ? r.so.map(s => '<div class="card"><h2>' + esc(s.ten) + ' <span class="note">(mã VT ' + esc(s.ma_vt) + ', ĐVT ' + esc(s.dvt) + ')</span></h2><div class="tbl-wrap">' + bang(s) + '</div></div>').join('') : '<div class="card empty">Chưa có nhập – xuất hóa chất kiểm soát. Đánh dấu "kiểm soát đặc biệt" ở Danh mục vật tư và nhập lô vào kho.</div>');
     $('b-loc').onclick = () => { location.hash = '#/kho/so-ks?tu=' + $('tu').value + '&den=' + $('den').value; };
     $('b-in').onclick = () => window.PTN_IN.xemTruoc({ ten: 'So hoa chat kiem soat ' + homNay(), trang: [window.PTN_IN.bang({ ten: 'So kiem soat', huong: 'ngang', tieuDe: 'SỔ THEO DÕI XUẤT – NHẬP HÓA CHẤT KIỂM SOÁT ĐẶC BIỆT',
-      phuDe: 'Kho F4.01' + (tu || den ? ' · từ ' + ngayVN(tu) + ' đến ' + ngayVN(den) : ''), cot: [{ ten: 'NGÀY', rong: 11, can: 'c' }, { ten: 'NỘI DUNG', rong: 20 }, { ten: 'SỐ LÔ', rong: 11 }, { ten: 'NHẬP', rong: 10 }, { ten: 'XUẤT', rong: 10 }, { ten: 'TỒN', rong: 10 },
+      phuDe: 'Kho F4.02' + (tu || den ? ' · từ ' + ngayVN(tu) + ' đến ' + ngayVN(den) : ''), cot: [{ ten: 'NGÀY', rong: 11, can: 'c' }, { ten: 'NỘI DUNG', rong: 20 }, { ten: 'SỐ LÔ', rong: 11 }, { ten: 'NHẬP', rong: 10 }, { ten: 'XUẤT', rong: 10 }, { ten: 'TỒN', rong: 10 },
         { ten: 'CHỨNG TỪ / BIÊN BẢN', rong: 36 }, { ten: 'NGƯỜI NHẬN', rong: 18 }, { ten: 'NGƯỜI GHI', rong: 16 }],
       dong: [].concat(...r.so.map(s => [{ nhom: s.ten + ' (mã VT ' + s.ma_vt + ', ĐVT ' + s.dvt + ')' }].concat(s.dong.map(d => [ngayVN(d.ngay), d.loai, d.so_lo, d.nhap === '' ? '' : d.nhap, d.xuat === '' ? '' : d.xuat, { v: d.ton, b: 1 }, d.chung_tu, d.nguoi_nhan, d.nguoi])))),
       ky: [['NGƯỜI LẬP SỔ', '(Ký, ghi rõ họ tên)'], ['VIỆN TRƯỞNG', '(Ký, ghi rõ họ tên)']] })] });

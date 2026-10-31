@@ -987,7 +987,11 @@
     const moi = !p; p = p || { so_tu: 20 };
     moHop('<h2>' + (moi ? 'Thêm phòng' : 'Sửa thông tin phòng ' + esc(p.ma)) + '</h2><form id="f"><div class="form-grid">' +
       o('ma', 'Mã phòng', { v: p.ma, req: 1, ph: 'F6.08', extra: moi ? '' : ' readonly' }) + o('so_tu', 'Số tủ', { type: 'number', v: p.so_tu, help: 'Tăng số tủ sẽ tạo thêm tủ; không tự xóa tủ đang có' }) +
-      o('ten', 'Tên phòng', { v: p.ten, req: 1, full: 1 }) + o('vi_tri', 'Vị trí', { v: p.vi_tri }) + o('dien_tich', 'Diện tích (m²)', { v: p.dien_tich }) +
+      o('ten', 'Tên phòng', { v: p.ten, req: 1, full: 1 }) +
+      // thứ tự phòng trên mọi danh sách (trang quản lý, ô chọn phòng ở trang dùng chung, báo cáo, lịch phòng)
+      o('sau', 'Vị trí hiển thị trong danh sách phòng', { full: 1, v: moi ? '' : 'GIU', select: (moi ? [] : [['GIU', 'Giữ nguyên vị trí hiện tại']]).concat([['^', 'Đầu danh sách']],
+        (S.dm.phong || []).filter(x => x.ma !== p.ma).map(x => [x.ma, 'Sau ' + x.ma + ' – ' + x.ten]), [['', 'Cuối danh sách']]) }) +
+      o('vi_tri', 'Vị trí', { v: p.vi_tri }) + o('dien_tich', 'Diện tích (m²)', { v: p.dien_tich }) +
       o('phu_trach', 'Cán bộ phụ trách', { v: p.phu_trach, full: 1 }) + o('chuc_nang', 'Chức năng', { v: p.chuc_nang, area: 1, full: 1 }) + o('ghi_chu', 'Ghi chú', { v: p.ghi_chu, full: 1 }) +
       '</div><div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Lưu</button></div></form>');
     $('f').onsubmit = async (e) => {

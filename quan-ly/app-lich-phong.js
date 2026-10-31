@@ -40,6 +40,8 @@
     const tu = che === 'tuan' ? congNgay(ngay, 2 - thuCua(ngay)) /* thứ 2 đầu tuần (CN = 8 → lùi 6 ngày) */ : ngay, den = che === 'tuan' ? congNgay(tu, 6) : ngay;
     const nd = trang('Lịch phòng thực hành', laAdmin() ? '<button class="btn o sm" id="b-gio-tiet">Giờ các tiết</button>' : '');
     const r = await api('lich_phong_th', { tu, den }), g = r.gio_tiet, khoa = r.phong.map(x => chuanPhong(x.ma)), tenKhoa = {}; r.phong.forEach(x => { tenKhoa[chuanPhong(x.ma)] = x.ten; });
+    // phòng của Viện theo thứ tự hiển thị (Phòng thí nghiệm › Vị trí hiển thị); phòng ngoài danh sách xếp sau theo mã
+    const xep = (x, y) => { const i = khoa.indexOf(x), j = khoa.indexOf(y); return (i < 0 ? 1e6 : i) - (j < 0 ? 1e6 : j) || x.localeCompare(y); };
     const dieuKhien = '<div class="tools"><input type="date" id="lpt-ngay" value="' + ngay + '"><button class="btn o sm" data-lui="-1">‹ ' + (che === 'tuan' ? 'Tuần trước' : 'Hôm trước') + '</button><button class="btn o sm" data-lui="0">Hôm nay</button><button class="btn o sm" data-lui="1">' + (che === 'tuan' ? 'Tuần sau' : 'Hôm sau') + ' ›</button>' +
       '<select id="lpt-xem"><option value="ngay"' + (che === 'ngay' ? ' selected' : '') + '>Theo ngày</option><option value="tuan"' + (che === 'tuan' ? ' selected' : '') + '>Theo tuần</option></select>' +
       '<select id="lpt-phong"><option value="">Mọi phòng có lịch</option><option value="khoa">Chỉ phòng thí nghiệm của Viện</option></select><input type="search" id="lpt-q" placeholder="Tìm môn, GV, lớp, phòng…"></div><div id="lpt-kq"></div>' +
@@ -49,7 +51,7 @@
       const loc = $('lpt-phong').value, tk = boDau($('lpt-q').value);
       const hop = (x) => (!loc || khoa.indexOf(x.phong) >= 0) && (!tk || boDau([x.phong, x.l.ten_mon, x.l.gv, x.l.lop, x.l.ma_lhp].join(' ')).indexOf(tk) >= 0);
       if (che === 'ngay') {
-        const b = buoiTrongNgay(r.lop, ngay, g).filter(hop), phong = [...new Set((loc === 'khoa' || !tk ? khoa : []).concat(b.map(x => x.phong)))].filter(x => !loc || khoa.indexOf(x) >= 0).sort();
+        const b = buoiTrongNgay(r.lop, ngay, g).filter(hop), phong = [...new Set((loc === 'khoa' || !tk ? khoa : []).concat(b.map(x => x.phong)))].filter(x => !loc || khoa.indexOf(x) >= 0).sort(xep);
         const dang = b.filter(x => dangDien(x, ngay));
         $('lpt-kq').innerHTML = '<h2>' + TEN_THU[thuCua(ngay)] + ', ' + ngayVN(ngay) + (ngay === homNay() ? ' · bây giờ ' + bayGioHM() : '') + '</h2>' +
           '<p class="note"><b>' + new Set(b.map(x => x.phong)).size + '</b> phòng có lịch · <b>' + b.length + '</b> buổi học' + (ngay === homNay() ? ' · <b style="color:var(--ok)">' + new Set(dang.map(x => x.phong)).size + '</b> phòng đang học lúc này' : '') + '</p>' +
@@ -60,7 +62,7 @@
                 ['Sáng', 'Chiều', 'Tối'].map(bu => '<td>' + c.filter(x => buoi(x.a) === bu).map(x => theBuoi(x, ngay)).join('') + '</td>').join('') + '</tr>'; }).join('') + '</tbody></table></div>');
       } else {
         const ngayTuan = Array.from({ length: 7 }, (_, i) => congNgay(tu, i)), theoNgay = {}; ngayTuan.forEach(n => { theoNgay[n] = buoiTrongNgay(r.lop, n, g).filter(hop); });
-        const phong = [...new Set((loc === 'khoa' ? khoa : []).concat(...ngayTuan.map(n => theoNgay[n].map(x => x.phong))))].sort();
+        const phong = [...new Set((loc === 'khoa' ? khoa : []).concat(...ngayTuan.map(n => theoNgay[n].map(x => x.phong))))].sort(xep);
         $('lpt-kq').innerHTML = '<h2>Tuần ' + ngayVN(tu) + ' – ' + ngayVN(den) + '</h2>' + (!phong.length ? '<div class="card empty">Không có buổi thực hành nào trong tuần.</div>' :
           '<div class="tbl-wrap"><table class="lpt tuan"><thead><tr><th>Phòng</th>' + ngayTuan.map(n => '<th' + (n === homNay() ? ' class="hn"' : '') + '>' + TEN_THU[thuCua(n)] + '<div class="note">' + ngayVN(n).slice(0, 5) + '</div></th>').join('') + '</tr></thead><tbody>' +
           phong.map(ph => '<tr><td><b>' + esc(ph) + '</b>' + (tenKhoa[ph] ? '<div class="note">PTN Viện</div>' : '') + '</td>' + ngayTuan.map(n => '<td' + (n === homNay() ? ' class="hn"' : '') + '>' + theoNgay[n].filter(x => x.phong === ph).map(x => theBuoi(x, n, 1)).join('') + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>');

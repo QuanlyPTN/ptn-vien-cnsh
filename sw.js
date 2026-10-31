@@ -1,5 +1,5 @@
 // Service worker: lưu vỏ app để mở nhanh; dữ liệu vẫn lấy trực tiếp từ Google
-var C = 'ptn-vcnsh-v4'; // bản Viện CNSH&TP (cùng tên miền quanlyptn.github.io với web Khoa – không đụng bộ đệm 'ptn-khsk-…')
+var C = 'ptn-vcnsh-v5'; // bản Viện CNSH&TP (cùng tên miền quanlyptn.github.io với web Khoa – không đụng bộ đệm 'ptn-khsk-…')
 var FILES = ['./', 'index.html', 'app-cong-khai.js', 'don-phu-luc.js', 'don-qr.js', 'phieu-gv.js', 'quan-ly/config.js', 'manifest.webmanifest', 'logo-mark.png', 'logo-ngang-xanh.png', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 self.addEventListener('install', function (e) { e.waitUntil(caches.open(C).then(function (c) { return c.addAll(FILES); })); self.skipWaiting(); });
 self.addEventListener('activate', function (e) {

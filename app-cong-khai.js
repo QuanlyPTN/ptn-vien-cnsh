@@ -232,14 +232,15 @@
     const o = $('tb-moi'), n = chuaDoc().length; if (!o) return;
     o.innerHTML = n ? '<a class="warn" href="#/thong-bao" style="display:block;background:#EEF3FE;border-color:#CFDCF8;color:#1C3A8A;text-decoration:none">🔔 Bạn có <b>' + n + '</b> thông báo mới từ PTN – bấm để xem</a>' : '';
   }
-  // lấy thông báo mới khi trang đang mở: mở lại ứng dụng từ nền và mỗi 60 giây (chỉ đọc, không ghi dữ liệu)
+  // lấy thông báo mới khi trang đang mở: mở lại ứng dụng từ nền, quay lại tab và mỗi 30 giây (chỉ đọc, không ghi dữ liệu)
   async function lamMoiTB() {
     if (!S.nd || document.hidden) return;
     S.ndXong = false;
     try { await dongBoNguoi(); noiQuanTrong(); } catch (e) { /* mất mạng: thử lại lần sau */ }
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) lamMoiTB(); });
-  setInterval(lamMoiTB, 60000);
+  ['focus', 'pageshow', 'online'].forEach(ev => window.addEventListener(ev, () => lamMoiTB())); // quay lại tab, Safari khôi phục trang từ bộ nhớ, có mạng trở lại
+  setInterval(lamMoiTB, 30000);
   // tin quan trọng chưa đọc: hiện khung nổi ngay khi mở trang, bấm "Đã đọc" mới tắt
   function noiQuanTrong() {
     if (document.querySelector('.noi-tb') || /^#\/thong-bao/.test(location.hash)) return;
@@ -249,7 +250,7 @@
   }
   // đồng bộ với máy chủ (mỗi lần mở trang): máy đã đăng ký → dùng thông tin trên máy chủ (kể cả sau khi PTN duyệt sửa)
   async function dongBoNguoi() {
-    if (S.ndXong && Date.now() - (S.ndLuc || 0) < 20000) return S.nd; // lấy lại sau 20 giây: thông báo mới, PTN vừa duyệt sửa thông tin
+    if (S.ndXong && Date.now() - (S.ndLuc || 0) < 5000) return S.nd; // mỗi lần chuyển trang lấy lại (trừ khi vừa lấy trong 5 giây): thông báo mới, PTN vừa duyệt sửa thông tin
     const r = await api('ck_nguoi_dung', { khoa: may().khoa });
     S.nd = r.nd; S.yc = r.yeu_cau || []; S.tb = r.thong_bao || []; S.ndXong = true; S.ndLuc = Date.now(); capChuong(); veDongTB();
     if (r.nd) { ghi('vcnsh_ho_so', tuMayChu(r.nd)); S.hs = null; }

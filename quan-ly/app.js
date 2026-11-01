@@ -229,7 +229,7 @@
   // ---------------- Khung trang ----------------
   const MENU = [
     ['tong-quan', '◧', 'Hôm nay'], ['don', '✉', 'Đơn đăng ký QR1 – QR8'], ['de-tai', '✎', 'Hồ sơ đề tài KLTN – NCKH'], ['nguoi-dung', '☺', 'Người dùng trang dùng chung'], ['thong-bao', '🔔', 'Thông báo'], ['phong', '▦', 'Phòng thí nghiệm'], ['lich-phong-th', '▦', 'Lịch phòng thực hành'], ['tai-san', '⚙', 'Tài sản'],
-    ['kiem-dinh', '✓', 'Kiểm định – bảo dưỡng'], ['hoa-chat', '⚗', 'Hóa chất – vật tư'], ['kho', '▣', 'Kho hóa chất F4.02'], ['kho-dl', '❀', 'Nguyên vật liệu thực phẩm'],
+    ['kiem-dinh', '✓', 'Kiểm định – bảo dưỡng'], ['hoa-chat', '⚗', 'Hóa chất – vật tư'], ['kho', '▣', 'Kho hóa chất F4.01'], ['kho-dl', '❀', 'Nguyên vật liệu thực phẩm'],
     ['bien-ban', '▤', 'Biên bản bàn giao'], ['bao-cao', '▥', 'Báo cáo – thống kê'], ['so', '☷', 'Sổ theo dõi – in ấn'], ['bieu-mau', '⎙', 'Biểu mẫu PTN'],
     ['giang-vien', '☺', 'Giảng viên'], ['lich-su-tai', '↺', 'Lịch sử tải file'], ['cai-dat', '⚑', 'Cài đặt – mã QR tổng', 1], ['can-bo', '☺', 'Cán bộ', 1], ['nhat-ky', '☰', 'Nhật ký', 1], ['tai-khoan', '⚿', 'Tài khoản']
   ];
@@ -958,7 +958,7 @@
       'Theo dõi dụng cụ, thiết bị, tủ, chìa khóa của từng nhóm; chỉ đóng hồ sơ khi đã trả đủ.', 'Minh chứng đề tài NCKH: upload (không bắt buộc). Phụ lục 3: in lệ phí + trạng thái "Đã thu phí".']],
     'hoa-chat': ['Hóa chất – vật tư', 'Giai đoạn 4', ['Danh mục vật tư theo mã VT của Trường (~3.600 mã, nhập từ file "Mã vật tư – mã bài tập"); đánh dấu hóa chất kiểm soát đặc biệt.',
       'Định mức theo bài thực hành (mã BT) – dữ liệu cốt lõi.', 'Upload thời khóa biểu thực hành → tự tính kế hoạch vật tư (theo học kỳ hoặc theo tháng) → xuất đúng mẫu gửi P.KHĐT.',
-      'Kho hóa chất F4.02: nhập – xuất – tồn, cảnh báo sắp hết / hết hạn, lưu COA; sổ theo dõi tiền chất.']],
+      'Kho hóa chất F4.01: nhập – xuất – tồn, cảnh báo sắp hết / hết hạn, lưu COA; sổ theo dõi tiền chất.']],
     'bien-ban': ['Biên bản bàn giao', 'Giai đoạn 4', ['Tự tạo biên bản hóa chất, dụng cụ cho từng lớp học phần theo form chuẩn; tải về in, soạn, giao lớp.',
       'Cây thư mục Năm học → Học kỳ → Môn → Lớp.', 'QR3 cấp bổ sung cộng thẳng vào biên bản hóa chất; hóa chất ngoài danh sách → thêm dòng + cảnh báo.',
       'Biên bản dụng cụ 2 nhánh: lớp thực hành và KLTN – NCKH; QR8 mượn thêm ghi thẳng vào biên bản, ghi chú người mượn; theo dõi trả – còn nợ.',

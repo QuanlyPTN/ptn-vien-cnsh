@@ -21,6 +21,10 @@
   const congDung = (q) => QR_CONG[q] ? '<div class="cd">' + QR_CONG[q][1] + '</div>' : '';
   const QR_AI = { QR1: 'Giảng viên, Sinh viên', QR5: 'Giảng viên, Sinh viên', QR6: 'Giảng viên, Sinh viên', QR8: 'Giảng viên, Sinh viên', QR7: 'Sinh viên', QR2: 'Giảng viên', QR3: 'Giảng viên', QR4: 'Giảng viên' };
   const QR_GV = ['QR2', 'QR3', 'QR4'];
+  // chưa phổ biến trang dùng chung (02/11/2026): trang chủ đủ các mã chỉ khi máy vào bằng mã QR tổng (?qr=TONG);
+  // vào bằng mã QR riêng (?qr=QRx) → trang chủ chỉ còn Đơn của tôi, Biểu mẫu PTN. Lần quét sau cùng quyết định. Mở trang chung cho mọi người: TRANG_CHUNG = true
+  // (bản chạy thử vẫn hiện đủ để kiểm thử; thêm ?chiqr=1 để thử chế độ này). Khóa vcnsh_ riêng: cùng tên miền với web Khoa
+  const TRANG_CHUNG = false, duMa = () => TRANG_CHUNG || !!doc('vcnsh_qr_tong') || (DEMO && !/[?&]chiqr=1/.test(location.search));
   const BIEU = { DT: '<path d="M9 3h6"/><path d="M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 14h10"/>', QR1: '<path d="M3 21h18"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/><path d="M9 21v-6h6v6"/>', QR2: '<path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2z"/>',
     QR3: '<path d="M9 3h6"/><path d="M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 15h10"/>', QR4: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
     QR5: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', QR6: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 3v18"/><path d="M9 12h.01M15 12h.01"/>',
@@ -208,13 +212,14 @@
   async function trangChu() {
     $('hb').classList.add('hide'); nutLui(false);
     const p = hoSo();
+    const du = duMa(), nhom1 = du ? Object.keys(QR_TEN).filter(q => QR_GV.indexOf(q) < 0) : [];
     let h = '<div class="card prof"><div class="av">' + esc((p.ho_ten || '?').trim().split(' ').pop().charAt(0)) + '</div><div class="i"><b>' + esc(p.ho_ten) + '</b><span>' + esc([p.ma_so, ngGui().doi_tuong, p.lop].filter(Boolean).join(' · ')) +
       '</span></div><a class="lnk" href="#/ho-so">Thông tin</a></div>' +
-      theGioLamViec() + '<div id="tb-moi"></div><div id="tb"></div><div class="tieu-de-nhom">Đăng ký – biểu mẫu</div><div class="grid">' +
-      Object.keys(QR_TEN).filter(q => QR_GV.indexOf(q) < 0).map(oQR).join('') +
-      '</div><div class="tieu-de-nhom">Giảng viên – thiết bị</div><div class="grid">' + QR_GV.map(oQR).join('') +
-      Object.keys(GV().LOAI).filter(q => !GV().LOAI[q].ngung).map(q => '<a class="tile" href="#/' + q + '">' + bieu(q) + '<span class="qv">' + q + '</span>' + esc(GV().LOAI[q].ten) + '</a>').join('') +
-      '<a class="tile" href="#/DT">' + bieu('DT') + '<span class="qv">DT</span>Dự trù hóa chất môn học<span class="note" style="font-size:12px">Nhập bằng mã PTN cấp</span></a>' +
+      theGioLamViec() + '<div id="tb-moi"></div><div id="tb"></div>' +
+      (nhom1.length ? '<div class="tieu-de-nhom">Đăng ký – biểu mẫu</div><div class="grid">' + nhom1.map(oQR).join('') + '</div>' : '') +
+      (du ? '<div class="tieu-de-nhom">Giảng viên – thiết bị</div><div class="grid">' + QR_GV.map(oQR).join('') : '<div class="hide">') +
+      (du ? Object.keys(GV().LOAI).filter(q => !GV().LOAI[q].ngung).map(q => '<a class="tile" href="#/' + q + '">' + bieu(q) + '<span class="qv">' + q + '</span>' + esc(GV().LOAI[q].ten) + '</a>').join('') +
+      '<a class="tile" href="#/DT">' + bieu('DT') + '<span class="qv">DT</span>Dự trù hóa chất môn học<span class="note" style="font-size:12px">Nhập bằng mã PTN cấp</span></a>' : '') +
       '</div><div class="tieu-de-nhom">Tiện ích</div><div class="grid"><a class="tile t2" href="#/don-cua-toi">' + bieu('cua_toi') + '<span><b>Đơn của tôi</b><br><span class="note" id="dem-don">Trạng thái các đơn đã gửi</span></span></a>' +
       '<a class="tile t2" href="#/bieu-mau">' + bieu('mau') + '<span><b>Biểu mẫu PTN</b><br><span class="note">Mẫu đơn, phiếu trống</span></span></a></div>' +
       (navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches) ? '' : '<div class="card note" style="margin-top:14px"><b>Cài như ứng dụng:</b> iPhone (Safari): bấm Chia sẻ → <i>Thêm vào MH chính</i>. Android (Chrome): bấm ⋮ → <i>Thêm vào màn hình chính</i>.</div>') +
@@ -339,13 +344,14 @@
       return;
     }
     const cuMay = !!(p && p.ma_so); // máy đã có thông tin từ trước khi khóa → xác nhận một lần
-    M('<div class="card"><h2>Thông tin cá nhân (nhập một lần)</h2>' +
+    const dich = (/^#\/(QR[1-8])/.exec(location.hash) || [])[1]; // đang quét QR riêng → báo bước tiếp theo
+    M((dich ? '<div class="pre"><b>Bước 1/2:</b> nhập thông tin cá nhân (chỉ lần đầu). <b>Bước 2/2:</b> điền đơn ' + dich + ' – ' + esc(QR_TEN[dich]) + '.</div>' : '') + '<div class="card"><h2>Thông tin cá nhân (nhập một lần)</h2>' +
       '<div class="warn">⚠ <b>Nhập đúng và đầy đủ.</b> Thông tin chỉ nhập <b>một lần</b>, gắn với thiết bị này và tự điền vào mọi biểu mẫu. Sau khi lưu, muốn sửa phải gửi đề nghị kèm lý do và được PTN duyệt.\n' +
       '• Mỗi người chỉ dùng <b>một thiết bị</b> (điện thoại hoặc máy tính). Thiết bị khác khai cùng MSSV sẽ bị báo lỗi.\n• Không nhập thay người khác.</div>' +
       (cuMay ? '<p class="note">Thông tin đang lưu trên máy này – kiểm tra lại rồi xác nhận.</p>' : '') +
       (S.yc || []).filter(y => y.trang_thai === 'Từ chối').slice(0, 1).map(dongYC).join('') +
       '<form id="f">' + oTT(p) + '<label class="check" style="margin-top:6px"><input type="checkbox" name="xac_nhan"> Tôi đã kiểm tra: thông tin <b>đúng, đầy đủ</b> và là của tôi.</label>' +
-      '<div class="err" id="err"></div><div id="o-chuyen"></div><button class="btn g" id="b-luu">Lưu thông tin</button></form></div>');
+      '<div class="err" id="err"></div><div id="o-chuyen"></div><button class="btn g" id="b-luu">' + (dich ? 'Lưu và tiếp tục điền đơn ' + dich + ' ›' : 'Lưu thông tin') + '</button></form></div>');
     ganTT($('f'));
     $('f').onsubmit = async (e) => {
       e.preventDefault(); const f = e.target, [v, loi] = docTT(f);
@@ -353,7 +359,7 @@
       if (!f.xac_nhan.checked) { $('err').textContent = 'Đánh dấu ô xác nhận thông tin đúng, đầy đủ'; return; }
       try {
         const r = await api('ck_dang_ky_nd', { may: may(), ng: ngTu(v), xac_nhan: 1 });
-        ghi('vcnsh_ho_so', tuMayChu(r)); S.hs = null; S.ndXong = false; toast('Đã lưu'); location.hash = '#/'; if (lanDau) dieuHuong();
+        ghi('vcnsh_ho_so', tuMayChu(r)); S.hs = null; S.ndXong = false; toast('Đã lưu'); if (lanDau) dieuHuong(); else location.hash = '#/'; // quét QR riêng: lưu xong vào thẳng đơn của mã đó
       } catch (x) {
         $('err').textContent = x.message;
         if (x.code === 'MAY_KHAC') { // đã đăng ký ở máy khác → đề nghị chuyển sang máy này
@@ -919,8 +925,10 @@
 
   // ---------------- Điều hướng ----------------
   async function dieuHuong() {
-    const qrCu = (/[?&]qr=(QR[1-8])/i.exec(location.search) || [])[1];
-    if (qrCu && !location.hash) { history.replaceState(null, '', location.pathname + (DEMO ? '?demo=1' : '') + '#/' + qrCu.toUpperCase()); }
+    const qrCu = (/[?&]qr=(QR[1-8])/i.exec(location.search) || [])[1], boQr = location.pathname + location.search.replace(/([?&])qr=[^&]*&?/i, '$1').replace(/[?&]$/, '');
+    if (/[?&]qr=TONG\b/i.test(location.search)) { ghi('vcnsh_qr_tong', true); history.replaceState(null, '', boQr + (location.hash || '#/')); }
+    else if (qrCu) ghi('vcnsh_qr_tong', false);
+    if (qrCu && !location.hash) { history.replaceState(null, '', boQr + '#/' + qrCu.toUpperCase()); }
     const p = (location.hash.replace(/^#\/?/, '') || '').split('/');
     // thông tin cá nhân: máy chủ là gốc (gắn với máy này); chưa đăng ký → nhập / xác nhận một lần
     let nd = S.nd; try { nd = await dongBoNguoi(); } catch (e) { /* mất mạng: dùng thông tin đã lưu trên máy */ nd = hoSo() && hoSo().ma_so ? true : null; }

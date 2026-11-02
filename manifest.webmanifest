@@ -3,6 +3,7 @@
   "short_name": "PTN Viện CNSH&TP",
   "description": "Đăng ký QR1–QR8, hồ sơ đề tài, biểu mẫu và đơn của tôi – phòng thí nghiệm Viện Công nghệ Sinh học và Thực phẩm, ĐH Công nghiệp TP.HCM",
   "lang": "vi",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

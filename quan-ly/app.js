@@ -740,10 +740,11 @@
       $('x-kq').innerHTML = hopFileExcel.chonSheet(ten) + '<p>Đọc được <b>' + kh.length + '</b> môn, <b>' + tong + '</b> dòng định mức (' + kh.reduce((a, m) => a + m.dm.filter(d => !/^\d+$/.test(d.ma_vt)).length, 0) + ' dòng chưa có mã VT).</p>' +
         '<div class="tbl-wrap" style="max-height:300px"><table><thead><tr><th>Môn trong file</th><th>Mã HP</th><th class="num">Lớp</th><th class="num">Dòng</th><th>Môn trên web</th></tr></thead><tbody>' +
         kh.map((m, i) => '<tr><td>' + esc(m.ten) + '</td><td class="mono">' + esc(m.ma_hp.join(', ')) + '</td><td class="num">' + m.lop.length + '</td><td class="num">' + m.dm.length + '</td><td>' + chon(m, i) + '</td></tr>').join('') + '</tbody></table></div>' +
-        '<p class="note" id="x-nhac"></p><div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="x-ok">Cập nhật định mức + biên bản</button></div>';
+        '<p class="note" id="x-nhac"></p><button type="button" class="btn o sm" id="x-moi-het" style="display:none"></button><div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="x-ok">Cập nhật định mức + biên bản</button></div>';
       hopFileExcel.ganSheet();
-      const nhac = () => { const c = kh.filter(m => !m._chon).length; $('x-nhac').innerHTML = c ? '<b style="color:var(--bad)">' + c + ' môn chưa khớp</b> – chọn môn cũ, "+ Tạo môn mới" hoặc "Bỏ qua".' : 'Mọi môn đã gắn vào môn trên web.'; };
+      const nhac = () => { const c = kh.filter(m => !m._chon).length; $('x-nhac').innerHTML = c ? '<b style="color:var(--bad)">' + c + ' môn chưa khớp</b> – chọn môn cũ, "+ Tạo môn mới" hoặc "Bỏ qua".' : 'Mọi môn đã gắn vào môn trên web.'; $('x-moi-het').style.display = c ? '' : 'none'; $('x-moi-het').textContent = '+ Tạo mới tất cả môn chưa khớp (' + c + ')'; };
       $('x-kq').querySelectorAll('select[data-i]').forEach(sl => { sl.onchange = () => { kh[+sl.dataset.i]._chon = sl.value; nhac(); }; }); nhac();
+      $('x-moi-het').onclick = () => { $('x-kq').querySelectorAll('select[data-i]').forEach(sl => { if (!sl.value) { sl.value = '~moi'; kh[+sl.dataset.i]._chon = '~moi'; } }); nhac(); }; // môn đã tự khớp giữ nguyên
       $('x-ok').onclick = async (e) => {
         if (kh.some(m => !m._chon)) return toast('Chọn môn trên web cho mọi môn (hoặc "Bỏ qua")', true);
         const ds = kh.filter(m => m._chon !== '~bo').map(m => Object.assign({}, m, { mon: m._chon === '~moi' ? '' : m._chon, _chon: undefined, ten: m._chon === '~moi' ? m.ten : (mons.find(x => x.ma === m._chon) || m).ten }));

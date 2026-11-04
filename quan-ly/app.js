@@ -792,13 +792,16 @@
           '<td>' + esc(x.dc.ten || '(không ghi)') + '</td><td class="num">' + x.dc.dm.length + '</td><td>' + chonMon(x, i) + '</td></tr>').join('') + '</tbody></table></div>') +
         (boQua.length ? '<details style="margin-top:6px"><summary class="note">' + boQua.length + ' sheet không đọc được (bỏ qua)</summary><ul class="note" style="margin:4px 0 0 18px;padding:0">' +
           boQua.map(x => '<li>' + esc(x.tep) + (x.sheet ? ' › <b>' + esc(x.sheet) + '</b>' : '') + ': ' + esc(x.loi) + '</li>').join('') + '</ul></details>' : '') +
-        '<p class="note" id="x-nhac"></p><div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="x-ok"' + (ds2.length ? '' : ' disabled') + '>Cập nhật danh sách gốc + biên bản</button></div>';
-      const nhac = () => { const ok = ds2.filter(x => x.chon), chua = ok.filter(x => !x.mon).length, k = ok.filter(x => x.mon && x.mon !== '~moi' && !coLop[x.mon]).length;
+        '<p class="note" id="x-nhac"></p><button type="button" class="btn o sm" id="x-moi-het" style="display:none"></button><div class="modal-foot"><button class="btn o" data-dong>Hủy</button><button class="btn" id="x-ok"' + (ds2.length ? '' : ' disabled') + '>Cập nhật danh sách gốc + biên bản</button></div>';
+      // sheet chưa có môn, hoặc bị bỏ tích vì khớp gần đúng vào môn đã có sheet khác (tên môn khác nhau) → tạo môn mới; sheet nháp cùng tên môn giữ nguyên
+      const canMoi = () => ds2.filter(x => x.dc.ten && (!x.mon || (x.trung && !x.chon && x.mon !== '~moi' && tenMonSo(x.dc.ten) !== tenMonSo(monTen(x.mon)))));
+      const nhac = () => { const c = canMoi().length; $('x-moi-het').style.display = c ? '' : 'none'; $('x-moi-het').textContent = '+ Tạo mới tất cả môn chưa khớp (' + c + ')'; const ok = ds2.filter(x => x.chon), chua = ok.filter(x => !x.mon).length, k = ok.filter(x => x.mon && x.mon !== '~moi' && !coLop[x.mon]).length;
         $('x-nhac').innerHTML = ds2.length + ' sheet đọc được · <b>' + ok.length + '</b> sheet đã chọn' + (chua ? ' · <b style="color:var(--bad)">' + chua + ' sheet chưa chọn môn</b>' : '') + (k ? ' · ' + k + ' môn chưa có lớp trong TKB ' + esc(hk) + ' (chỉ lưu danh sách, chưa tạo biên bản)' : ''); };
       $('x-kq').querySelectorAll('select[data-i]').forEach(sl => { sl.onchange = () => { ds2[+sl.dataset.i].mon = sl.value; nhac(); }; });
       $('x-kq').querySelectorAll('[data-chon]').forEach(c => { c.onchange = () => { ds2[+c.dataset.chon].chon = c.checked; nhac(); }; });
       if ($('x-chon-het')) $('x-chon-het').onchange = (ev) => { ds2.forEach(x => { x.chon = ev.target.checked; }); $('x-kq').querySelectorAll('[data-chon]').forEach(c => { c.checked = ev.target.checked; }); nhac(); };
       nhac();
+      $('x-moi-het').onclick = () => { canMoi().forEach(x => { const i = ds2.indexOf(x); x.mon = '~moi'; x.chon = true; $('x-kq').querySelector('select[data-i="' + i + '"]').value = '~moi'; $('x-kq').querySelector('[data-chon="' + i + '"]').checked = true; }); nhac(); };
       $('x-ok').onclick = async (ev) => {
         const ok = ds2.filter(x => x.chon); if (!ok.length) return toast('Chọn ít nhất một sheet', true);
         if (ok.some(x => !x.mon)) return toast('Chọn môn cho mọi sheet đã chọn', true);

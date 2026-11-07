@@ -13,7 +13,7 @@
   function duTru(r) {
     const caHK = r.dot === 'HK', h = hk2(r.hk);
     const ky = (caHK ? '' : 'ĐỢT ' + r.dot + ' - ') + 'HỌC KỲ ' + h.ky + ' NĂM HỌC ' + h.nam;
-    const tenSheet = caHK ? 'KSK. ' + r.hk : 'KSK. Dot ' + r.dot + ' ' + r.hk;
+    const tenSheet = caHK ? 'VST. ' + r.hk : 'VST. Dot ' + r.dot + ' ' + r.hk;
     const dsDot = (a) => a.length > 1 ? a.slice(0, -1).join(', ') + ' và ' + a[a.length - 1] : a.join('');
     const ghiChu = caHK ? '' : [r.ngay_nop ? 'Nộp Phòng Kế hoạch – Đầu tư ngày ' + r.ngay_nop.split('-').reverse().join('/') : '',
       r.dot === '1' ? 'Đợt 1: tối thiểu ' + (r.ty_le || 70) + '% nhu cầu cả học kỳ' : 'Nhu cầu cả học kỳ trừ số đã nhận đợt ' + dsDot(Array.from({ length: +r.dot - 1 }, (_, i) => i + 1)),
@@ -35,7 +35,7 @@
     IN.chuKy(n1, [['VIỆN TRƯỞNG', '', r.ky.truong_khoa], ['NGƯỜI LẬP BIỂU', '', r.ky.nguoi_lap]], 4).forEach(x => t1.push(x));
     const s1 = { ten: caHK ? 'Tong hop ' + r.hk : 'Tong hop dot ' + r.dot, huong: 'doc', cot: [6, 14.2, 46.4, 31.2, 9.2, 8, 15], lapLai: [6, 6], hang: t1, le: [0.6, 0.55, 0.6, LE_TRAI] };
 
-    // Sheet 2 – Kế hoạch theo môn (mẫu "KSK. 10 2026", khổ ngang, tỷ lệ 75%)
+    // Sheet 2 – Kế hoạch theo môn (mẫu "KH vật tư theo môn", khổ ngang, tỷ lệ 75%)
     const n2 = 13, t2 = [rong(n2),
       { cao: 18, o: [{ v: 'TRƯỜNG ĐẠI HỌC CÔNG NGHIỆP THÀNH PHỐ HỒ CHÍ MINH', cs: 6, b: 1 }, { v: 'KẾ HOẠCH VẬT TƯ ' + ky, cs: 6, can: 'c', b: 1, co: 14 }, { v: '' }] },
       { cao: 16, o: [{ v: 'ĐƠN VỊ: VIỆN CÔNG NGHỆ SINH HỌC VÀ THỰC PHẨM', cs: 5, b: 1 }, { v: '', cs: 8 }] },

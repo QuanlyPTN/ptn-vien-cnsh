@@ -656,7 +656,7 @@
       (ds.length && laAdmin() ? '<div class="btns" style="margin-bottom:6px"><button class="btn red o sm" id="b-xoa-mon" disabled>🗑 Xóa môn đã chọn</button><span class="note">Xóa hẳn môn kèm định mức, dự trù, biên bản lớp thực hành; thời khóa biểu giữ nguyên (bỏ gán môn). Thu hồi được ở Lịch sử tải file.</span></div>' : '') +
       (ds.length ? '<div class="tbl-wrap"><table><thead><tr>' + (laAdmin() ? '<th style="width:28px"><input type="checkbox" id="chon-het-mon" title="Chọn tất cả"></th>' : '') + '<th>Mã</th><th>Môn thực hành</th><th>Mã học phần</th><th class="num">Dòng hóa chất</th><th class="num">Dòng dụng cụ</th></tr></thead><tbody>' +
         ds.map(m => '<tr class="click" data-ma="' + esc(m.ma) + '">' + (laAdmin() ? '<td><input type="checkbox" data-chon-mon="' + esc(m.ma) + '"></td>' : '') + '<td class="mono">' + esc(m.ma) + '</td><td><b>' + esc(m.ten) + '</b></td><td class="mono">' + esc(m.ma_hp) + '</td><td class="num">' + (m.so_hc || '<span class="tag t-warn">0</span>') + '</td><td class="num">' + (m.so_dc || '—') + '</td></tr>').join('') + '</tbody></table></div>'
-        : '<div class="card empty">Chưa có môn. Bấm "Nhập định mức hóa chất" và chọn file kế hoạch vật tư (ví dụ "KSK. KH vat HKI 2026.xlsm").</div>');
+        : '<div class="card empty">Chưa có môn. Bấm "Nhập định mức hóa chất" và chọn file kế hoạch vật tư (ví dụ "KH vat tu HKI 2026.xlsx").</div>');
     nd.querySelectorAll('tr[data-ma]').forEach(tr => { tr.onclick = (e) => { if (e.target.closest('input')) return; location.hash = '#/hoa-chat/mon/' + tr.dataset.ma; }; });
     if ($('b-xoa-mon')) {
       const capNhat = () => { const n = nd.querySelectorAll('[data-chon-mon]:checked').length; $('b-xoa-mon').disabled = !n; $('b-xoa-mon').textContent = '🗑 Xóa môn đã chọn' + (n ? ' (' + n + ')' : ''); };
@@ -1287,7 +1287,7 @@
   const so1 = (v) => { const n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isNaN(n) ? 0 : n; };
   const chu = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
   const tim = (row, re) => row.findIndex(c => re.test(boDau(chu(c)))); // tiêu đề có thể xuống dòng
-  // File "Kế hoạch vật tư" (KSK. KH vat HKx …): khối theo môn "1. TH …", danh sách lớp (mã lớp, mã HP, sĩ số), vật tư + SLG/1HS (+ SLG nếu có)
+  // File "Kế hoạch vật tư" (KH vat tu HKx …): khối theo môn "1. TH …", danh sách lớp (mã lớp, mã HP, sĩ số), vật tư + SLG/1HS (+ SLG nếu có)
   // tuy.monKhongSo: tên môn có thể ghi không đánh số (file dự trù của môn: "Công nghiệp dược" cùng dòng lớp, STT 1)
   function docKeHoachVatTu(rows, tuy) {
     tuy = tuy || {};

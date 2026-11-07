@@ -10,8 +10,8 @@
         ['BẮT ĐẦU', 12], ['KẾT THÚC', 12], ['PHÒNG HỌC', 11], ['GIẢNG VIÊN', 22]],
       hd: ['Mỗi dòng là một ca thực hành (một nhóm của một lớp học phần).', 'MÃ LHP: mã lớp học phần (ít nhất 6 chữ số, nên ghi dạng chữ để không mất số 0 đầu).',
         'BẮT ĐẦU, KẾT THÚC: ngày dạng dd/mm/yyyy. PHÒNG HỌC: mã phòng như F6.08.', 'Nhập lại thời khóa biểu sẽ thay toàn bộ thời khóa biểu cũ của học kỳ đang chọn.'],
-      vd: [[1, 'Dược', '420301632901', 'TH dược khoa', 'DHDH21A', 'DHDH21A', 2, 1, 5, 1, 25, '03/08/2026', '19/10/2026', 'F6.08', 'ThS. Nguyễn Văn A'],
-        [2, 'Dược', '420301632902', 'TH dược khoa', 'DHDH21B', 'DHDH21B', 4, 7, 11, 2, 24, '05/08/2026', '21/10/2026', 'F6.09', 'ThS. Trần Thị B']] },
+      vd: [[1, 'Công nghệ thực phẩm', '420300210802', 'Phụ gia thực phẩm', 'DHTP20A', 'DHTP20A', 2, 1, 5, 1, 25, '03/08/2026', '19/10/2026', 'F5.07', 'ThS. Nguyễn Văn A'],
+        [2, 'Công nghệ thực phẩm', '420300210803', 'Phụ gia thực phẩm', 'DHTP20B', 'DHTP20B', 4, 7, 11, 2, 24, '05/08/2026', '21/10/2026', 'F5.08', 'ThS. Trần Thị B']] },
     ma_vt: { ten: 'Danh mục mã vật tư', tep: '02 Mau danh muc ma vat tu', trang: 'Ma vat tu', tieuDe: 'BẢNG MÃ VẬT TƯ CỦA TRƯỜNG', // tiêu đề không chứa cả "mã vật tư" lẫn "danh mục" (kẻo bị nhận là dòng tiêu đề cột)
       cot: [['MÃ VẬT TƯ', 12], ['DANH MỤC VẬT TƯ', 36], ['LOẠI', 8], ['NSX', 10], ['ĐVỊ', 9], ['MÃ EFFECT', 12], ['NHÓM', 9]],
       hd: ['MÃ VẬT TƯ: chỉ gồm chữ số (mã của Trường). Dòng có mã không phải số sẽ bị bỏ qua.', 'Mã đã có trên hệ thống được cập nhật tên, ĐVT…; đánh dấu "kiểm soát" giữ nguyên.'],
@@ -23,24 +23,24 @@
         'Lớp học của môn: ghi MÃ SỐ LỚP, MÃ HỌC PHẦN, SĨ SỐ ở các dòng đầu của môn (mỗi lớp một dòng) – không bắt buộc.',
         'Nhóm (Hóa chất / Nguyên vật liệu thực phẩm / Vật tư tiêu hao): chia 3 vùng ngăn bằng MỘT dòng trắng (vùng 1 Hóa chất, vùng 2 Nguyên vật liệu thực phẩm, vùng 3 Vật tư tiêu hao; thiếu nhóm nào để 2 dòng trắng liền nhau), STT mỗi vùng từ 1; hoặc ghi tên nhóm ở cột TÊN BÀI TẬP của dòng đầu nhóm. Không chia thì hệ thống tự xếp theo tên / mã VT.',
         'File có thể chỉ gồm một vài môn; định mức của các môn có trong file được thay, biên bản hóa chất của học kỳ tự cập nhật. Không ghi gì dưới dòng "Người lập" / "Viện trưởng".'],
-      vd: [['1. TH dược khoa', '', 'DHDH21A', '420301632901', 20, 1, 'Acid ascorbic', '803', 'TQ', 'Gam', 0.4, '', ''],
-        ['', '', 'DHDH21B', '420301632902', 22, 2, 'Cồn 96 độ', '1053', 'TQ', 'Lít', 0.065, '', ''],
+      vd: [['1. TH Phụ gia thực phẩm', '', 'DHTP20A', '420300210802', 20, 1, 'Acid ascorbic', '803', 'TQ', 'Gam', 0.4, '', ''],
+        ['', '', 'DHTP20B', '420300210803', 22, 2, 'Cồn 96 độ', '1053', 'TQ', 'Lít', 0.065, '', ''],
         ['NGUYÊN VẬT LIỆU THỰC PHẨM', '', '', '', '', 1, 'Bột mì đa dụng', '', 'VN', 'Gam', 2, '', ''],
-        ['2. TH bào chế 1', '', 'DHDH20A', '420301634001', 25, 1, 'Vaselin', '1790', 'VN', 'Gam', 5, '', '']] },
+        ['2. TH Công nghệ chế biến bánh kẹo', '', 'DHDBTP20A', '420300214101', 21, 1, 'Agar', '829', 'VN', 'Gam', 0.5, '', '']] },
     dung_cu: { ten: 'Dụng cụ của một môn', tep: '04 Mau dung cu cua mot mon', trang: 'Dung cu', tieuDe: 'DANH SÁCH DỤNG CỤ THỰC HÀNH CỦA MÔN',
       truoc: [['MÔN:', '']], cot: [['STT', 6], ['Tên dụng cụ', 36], ['NSX', 12], ['ĐVT', 8], ['Số lượng / 1 bộ', 16], ['Ghi chú', 24]],
-      hd: ['Ghi tên môn ở ô cạnh chữ "MÔN:" (VD: TH Dược lâm sàng) – hệ thống tự gợi ý môn; không ghi thì chọn môn khi tải lên.',
+      hd: ['Ghi tên môn ở ô cạnh chữ "MÔN:" (VD: TH Kỹ thuật hỗ trợ sinh sản) – hệ thống tự gợi ý môn; không ghi thì chọn môn khi tải lên.',
         'Số lượng là 1 bộ dụng cụ giao cho 1 lớp thực hành (gồm các nhóm của lớp). Mỗi môn chỉ tải 1 file; lớp nhận thêm bộ 2, 3 thì xuất biên bản bộ 2, 3 ở trang biên bản dụng cụ (nút "Xuất bộ 2, 3…"), không tải thêm file.',
         'Mỗi file một môn. Dòng thiếu tên hoặc số lượng bị bỏ qua.'],
-      vd: [[1, 'Máy đo huyết áp điện tử', 'Omron', 'Cái', 1, ''], [2, 'Cốc có mỏ 100 mL', 'Duran', 'Cái', 4, '']] },
+      vd: [[1, 'Ống đong 100 mL', 'Duran', 'Cái', 1, ''], [2, 'Cốc có mỏ 100 mL', 'Duran', 'Cái', 4, '']] },
     du_tru_mon: { ten: 'Dự trù hóa chất của môn (kế hoạch vật tư)', tep: '05 Mau du tru hoa chat cua mon', trang: 'KH vat tu', tieuDe: 'KẾ HOẠCH VẬT TƯ – DỰ TRÙ HÓA CHẤT CỦA MÔN',
       cot: [['TÊN BÀI TẬP', 24], ['MÃ BT', 6], ['MÃ SỐ LỚP', 11], ['MÃ HỌC PHẦN', 15], ['SĨ SỐ', 6], ['STT', 5], ['QUI CÁCH VẬT TƯ', 30], ['MÃ VT', 8], ['NSX', 8], ['ĐVỊ', 7], ['SLG/1HS', 9], ['SLG', 9], ['GHI CHÚ', 16]],
       hd: ['Cùng cách ghi với mẫu định mức hóa chất: mỗi môn bắt đầu bằng dòng "1. TH <tên môn>" (hoặc chỉ tên môn) ở cột TÊN BÀI TẬP.',
         'SLG: tổng số lượng dự trù. Dòng để trống SLG được tính = SLG/1HS × tổng sĩ số các lớp của môn trong file.',
         'NHÓM: trong mỗi môn chia 3 vùng ngăn bằng MỘT dòng trắng: vùng 1 = Hóa chất, vùng 2 = Nguyên vật liệu thực phẩm, vùng 3 = Vật tư tiêu hao (STT mỗi vùng bắt đầu lại từ 1). Môn không có một nhóm thì để 2 dòng trắng liền nhau ở chỗ nhóm đó. Không chia vùng thì hệ thống tự xếp theo tên / mã VT.',
         'Có thể tải lên Phiếu dự trù do hệ thống in ra (mỗi trang tính một môn) thay cho mẫu này.'],
-      vd: [['1. TH dược khoa', '', 'DHDH21A', '420301632901', 20, 1, 'Acid ascorbic', '803', 'TQ', 'Gam', 0.4, 49.2, ''],
-        ['', '', 'DHDH21B', '420301632902', 22, 2, 'Cồn 96 độ', '1053', 'TQ', 'Lít', 0.065, '', '']] },
+      vd: [['1. TH Phụ gia thực phẩm', '', 'DHTP20A', '420300210802', 20, 1, 'Acid ascorbic', '803', 'TQ', 'Gam', 0.4, 49.2, ''],
+        ['', '', 'DHTP20B', '420300210803', 22, 2, 'Cồn 96 độ', '1053', 'TQ', 'Lít', 0.065, '', '']] },
     cap_dot: { ten: 'Danh sách vật tư – hóa chất được cấp (theo đợt)', tep: '06 Mau danh sach duoc cap theo dot', trang: 'Duoc cap', tieuDe: 'DANH SÁCH VẬT TƯ – HÓA CHẤT ĐƯỢC CẤP – ĐỢT THÁNG ……',
       cot: [['STT', 6], ['MÃ VT', 10], ['TÊN – QUY CÁCH', 36], ['ĐVT', 8], ['SỐ LƯỢNG ĐƯỢC CẤP', 14], ['GHI CHÚ', 22]],
       hd: ['Danh sách vật tư – hóa chất Phòng Quản trị cấp (dự kiến hoặc thực tế) cho một đợt; số này được trừ vào dự trù các đợt sau.', 'Nên ghi MÃ VT để khớp chính xác; không có mã thì ghi đúng tên – quy cách.'],
@@ -67,7 +67,7 @@
     hang.push(dong('Điền dữ liệu ở trang tính "' + m.trang + '" (trang đầu), giữ nguyên dòng tiêu đề cột; không đổi tên, không xóa cột. Có thể thêm dòng.', { i: 1 }));
     m.hd.forEach((t, i) => hang.push(dong((i + 1) + '. ' + t)));
     hang.push(dong(''), dong('Ví dụ:', { b: 1 }));
-    (m.truoc || []).forEach(r => hang.push({ cao: 20, o: r.map((v, i) => ({ v: i ? 'TH Dược lâm sàng' : v, b: i === 0 })) }));
+    (m.truoc || []).forEach(r => hang.push({ cao: 20, o: r.map((v, i) => ({ v: i ? 'TH Kỹ thuật hỗ trợ sinh sản' : v, b: i === 0 })) }));
     hang.push({ cao: 36, o: m.cot.map(c => ({ v: c[0], b: 1, can: 'c', vien: 1, nen: NEN_TD })) });
     m.vd.forEach(r => hang.push({ cao: 18, o: r.map(v => ({ v, vien: 1, i: 1 })) }));
     return { ten: 'Huong dan', huong: 'ngang', cot: m.cot.map(c => c[1]), hang };

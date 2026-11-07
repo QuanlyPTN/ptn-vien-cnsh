@@ -638,7 +638,7 @@
     const chonVT = lo ? '<p><b>Lô ' + esc(lo.lo.so_lo || lo.lo.id) + '</b> – ' + esc(lo.lo.ten) + ' · tồn ' + fmt(lo.ton) + ' ' + esc(lo.lo.dvt) + '</p>'
       : o('khoa', 'Vật tư', { select: [['', '— Chọn —']].concat(ds.filter(g => g.ton > 0).map(g => [g.khoa, g.ten + ' (tồn ' + fmt(g.ton) + ' ' + g.dvt + ')'])), req: 1 });
     moHop('<h2>' + (lo ? 'Xuất từ lô' : 'Xuất kho') + '</h2><form id="f">' + chonVT + '<div class="form-grid">' + o('loai', 'Loại', { select: [['xuat', 'Xuất sử dụng'], ['huy', 'Hủy']] }) + o('sl', 'Số lượng', { type: 'number', req: 1, extra: ' step="any" min="0"' }) +
-      o('ngay', 'Ngày', { type: 'date', v: homNay() }) + o('nguoi_nhan', 'Người nhận') + o('ly_do', 'Lý do / chứng từ', { full: 1, ph: 'VD: NCKH đề tài KL-2627-015; TH Hóa dược lớp …' }) + '</div>' +
+      o('ngay', 'Ngày', { type: 'date', v: homNay() }) + o('nguoi_nhan', 'Người nhận') + o('ly_do', 'Lý do / chứng từ', { full: 1, ph: 'VD: NCKH đề tài KL-2627-015; TH Phụ gia thực phẩm lớp …' }) + '</div>' +
       (lo ? '' : '<p class="note">Xuất theo hạn dùng gần nhất trước. Cấp cho lớp thực hành nên ghi ở biên bản – kho tự trừ.</p>') + '<div class="modal-foot"><button type="button" class="btn o" data-dong>Hủy</button><button class="btn">Ghi</button></div></form>');
     $('f').onsubmit = async (e) => {
       e.preventDefault(); const v = giaTri(e.target), gd = { loai: v.loai, sl: v.sl, ngay: v.ngay, nguoi_nhan: v.nguoi_nhan, ly_do: v.ly_do };
